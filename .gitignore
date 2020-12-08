@@ -1,0 +1,11 @@
+.DS_Store
+*.code-workspace
+*.json
+*.out
+*.pth
+*.png
+*.jpg
+*.gif
+*.tfevents.*
+*.pyc
+
