@@ -13,6 +13,8 @@ from tensorflow.python.framework import ops
 # 自作モジュール
 from data.dataset import load_dataset
 from utils.utils import set_random_seed, numerical_sort
+from utils.utils import sava_image_tsr
+#from utils.utils import board_add_image, board_add_images
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -60,18 +62,20 @@ if __name__ == '__main__':
     # 実行 Device の設定
     pass
 
-
     # seed 値の固定
     set_random_seed(args.seed)
 
     # tensorboard 出力
-    pass
+    board_train = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name) )
+    board_valid = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
+    board_train.set_as_default()
+    #board_valid.set_as_default()
 
     #================================
     # データセットの読み込み
     #================================    
     # 学習用データセットとテスト用データセットの設定
-    load_dataset( args.dataset_dir )
+    ds_train = load_dataset( args.dataset_dir )
 
     #================================
     # モデルの構造を定義する。
@@ -92,11 +96,58 @@ if __name__ == '__main__':
     # モデルの学習
     #================================    
     print("Starting Training Loop...")
-    """
+    n_prints = 1
+    step = 0
+    iters = 0
     for epoch in tqdm( range(args.n_epoches), desc = "epoches" ):
+        # ミニバッチデータの取り出し
+        for image_s, image_t in ds_train:
+            if( args.debug and n_prints > 0 ):
+                print("[image_s] shape={}, dtype={}, min={}, max={}".format(image_s.shape, image_s.dtype, np.min(image_s.numpy()), np.max(image_s.numpy())))
+                print("[image_t] shape={}, dtype={}, min={}, max={}".format(image_t.shape, image_t.dtype, np.min(image_t.numpy()), np.max(image_t.numpy())))
+                sava_image_tsr( image_s[0], "_debug/image_s.png" )
+                sava_image_tsr( image_t[0], "_debug/image_t.png" )
+
             #----------------------------------------------------
             # 生成器 の forword 処理
             #----------------------------------------------------
             pass
-        
-    """
+    
+            #----------------------------------------------------
+            # 生成器の更新処理
+            #----------------------------------------------------
+            pass
+
+            #====================================================
+            # 学習過程の表示
+            #====================================================
+            if( step == 0 or ( step % args.n_diaplay_step == 0 ) ):
+                # lr
+                pass
+
+                # loss
+                with board_train.as_default():
+                    tf.summary.scalar("G/loss_G", 0, step=step, description="生成器の全loss")
+
+                # visual images
+                with board_train.as_default():
+                    tf.summary.image( "train/image_s", image_s, step=step )
+                    tf.summary.image( "train/image_t", image_t, step=step )
+
+            #====================================================
+            # valid データでの処理
+            #====================================================
+            if( step != 0 and ( step % args.n_display_valid_step == 0 ) ):
+                pass
+
+            step += 1
+            iters += args.batch_size
+            n_prints -= 1
+
+        #====================================================
+        # モデルの保存
+        #====================================================
+        if( epoch % args.n_save_epoches == 0 ):
+            pass
+
+    print("Finished Training Loop.")
