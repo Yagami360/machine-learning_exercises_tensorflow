@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 
 # TensorFlow ライブラリ
 import tensorflow as tf
-from tensorflow.python.framework import ops
 
 # 自作モジュール
 from utils.utils import set_random_seed, numerical_sort

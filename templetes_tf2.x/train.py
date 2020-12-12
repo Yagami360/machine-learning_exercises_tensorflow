@@ -8,13 +8,13 @@ import cv2
 
 # TensorFlow ライブラリ
 import tensorflow as tf
-from tensorflow.python.framework import ops
 
 # 自作モジュール
 from data.dataset import load_dataset
+from models.networks import TempleteNetworks
 from utils.utils import set_random_seed, numerical_sort
 from utils.utils import sava_image_tsr
-#from utils.utils import board_add_image, board_add_images
+from utils.utils import board_add_image, board_add_images
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -60,7 +60,12 @@ if __name__ == '__main__':
         os.mkdir( os.path.join(args.save_checkpoints_dir, args.exper_name) )
 
     # 実行 Device の設定
-    pass
+    if( tf.config.experimental.list_physical_devices("GPU") ):
+        # GPU
+        pass
+    else:
+        # CPU
+        pass
 
     # seed 値の固定
     set_random_seed(args.seed)
@@ -75,22 +80,25 @@ if __name__ == '__main__':
     # データセットの読み込み
     #================================    
     # 学習用データセットとテスト用データセットの設定
-    ds_train = load_dataset( args.dataset_dir )
+    ds_train = load_dataset( args.dataset_dir, image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = args.batch_size )
 
     #================================
     # モデルの構造を定義する。
     #================================
-    pass
-
+    model_G = TempleteNetworks()
+    if( args.debug ):
+        model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )    # 動的作成されるネットワークなので、一度ネットワークに入力データを供給しないと summary() を出力できない
+        model_G.summary()
+    
     #================================
     # optimizer の設定
     #================================
-    pass
+    optimizer_G = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 )
 
     #================================
     # loss 関数の設定
     #================================
-    pass
+    loss_fn = tf.keras.losses.MeanSquaredError()
 
     #================================
     # モデルの学習
@@ -116,7 +124,7 @@ if __name__ == '__main__':
             #----------------------------------------------------
             # 生成器の更新処理
             #----------------------------------------------------
-            pass
+            loss_G = tf.zeros([1], dtype=tf.float32)[0]
 
             #====================================================
             # 学習過程の表示
@@ -127,12 +135,17 @@ if __name__ == '__main__':
 
                 # loss
                 with board_train.as_default():
-                    tf.summary.scalar("G/loss_G", 0, step=step, description="生成器の全loss")
+                    tf.summary.scalar("G/loss_G", loss_G, step=step+1, description="生成器の全loss")
 
                 # visual images
                 with board_train.as_default():
-                    tf.summary.image( "train/image_s", image_s, step=step )
-                    tf.summary.image( "train/image_t", image_t, step=step )
+                    tf.summary.image( "train/image_s", image_s, step=step+1 )
+                    tf.summary.image( "train/image_t", image_t, step=step+1 )
+
+                    visuals = [
+                        [ image_s, image_t, ],
+                    ]
+                    board_add_images(board_train, 'train', visuals, step+1, offset = False )
 
             #====================================================
             # valid データでの処理
