@@ -1,5 +1,5 @@
 # machine-learning_exercises_tensorflow
-
+TensorFlow を利用した機械学習モデルの実装コード集
 
 ## 動作環境
 

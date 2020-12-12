@@ -26,7 +26,6 @@ if __name__ == '__main__':
     parser.add_argument('--tensorboard_dir', type=str, default="tensorboard", help="TensorBoard のディレクトリ")
     parser.add_argument("--n_epoches", type=int, default=100, help="エポック数")    
     parser.add_argument('--batch_size', type=int, default=4, help="バッチサイズ")
-    parser.add_argument('--batch_size_valid', type=int, default=1, help="バッチサイズ")
     parser.add_argument('--image_height', type=int, default=128, help="入力画像の高さ（pixel単位）")
     parser.add_argument('--image_width', type=int, default=128, help="入力画像の幅（pixel単位）")
     parser.add_argument('--lr', type=float, default=0.0002, help="学習率")
@@ -41,7 +40,7 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=71)
     parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
     parser.add_argument('--n_workers', type=int, default=4, help="CPUの並列化数（0 で並列化なし）")
-    parser.add_argument('--detect_nan', action='store_true')
+    parser.add_argument('--use_tfrecord', action='store_true')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     if( args.debug ):
@@ -58,6 +57,9 @@ if __name__ == '__main__':
         os.mkdir(args.save_checkpoints_dir)
     if not( os.path.exists(os.path.join(args.save_checkpoints_dir, args.exper_name)) ):
         os.mkdir( os.path.join(args.save_checkpoints_dir, args.exper_name) )
+
+    # Eager execution mode / tensorflow 2.x では明示不要
+    #tf.enable_eager_execution()
 
     # 実行 Device の設定
     if( tf.config.experimental.list_physical_devices("GPU") ):
@@ -80,12 +82,15 @@ if __name__ == '__main__':
     # データセットの読み込み
     #================================    
     # 学習用データセットとテスト用データセットの設定
-    ds_train = load_dataset( args.dataset_dir, image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = args.batch_size )
+    ds_train, ds_valid, n_trains, n_valids = load_dataset( args.dataset_dir, image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = args.batch_size, use_tfrecord = args.use_tfrecord, seed = args.seed )
+    if( args.debug ):
+        print( "n_trains : ", n_trains )
+        print( "n_valids : ", n_valids )
 
     #================================
     # モデルの構造を定義する。
     #================================
-    model_G = TempleteNetworks()
+    model_G = TempleteNetworks(out_dim=3)
     if( args.debug ):
         model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )    # 動的作成されるネットワークなので、一度ネットワークに入力データを供給しないと summary() を出力できない
         model_G.summary()
@@ -107,6 +112,7 @@ if __name__ == '__main__':
     n_prints = 1
     step = 0
     iters = 0
+
     for epoch in tqdm( range(args.n_epoches), desc = "epoches" ):
         # ミニバッチデータの取り出し
         for image_s, image_t in ds_train:
@@ -116,15 +122,26 @@ if __name__ == '__main__':
                 sava_image_tsr( image_s[0], "_debug/image_s.png" )
                 sava_image_tsr( image_t[0], "_debug/image_t.png" )
 
-            #----------------------------------------------------
-            # 生成器 の forword 処理
-            #----------------------------------------------------
-            pass
-    
-            #----------------------------------------------------
-            # 生成器の更新処理
-            #----------------------------------------------------
-            loss_G = tf.zeros([1], dtype=tf.float32)[0]
+            #====================================================
+            # 学習処理
+            #====================================================
+            @tf.function    # 高速化のためのデコレーター
+            def train_on_batch(input, target):
+                # スコープ以下を自動微分計算
+                with tf.GradientTape() as tape:
+                    # モデルの forward 処理
+                    output = model_G(input, training=True)
+
+                    # 損失関数の計算
+                    loss_G = loss_fn(target, output)
+
+                # モデルの更新処理
+                grads = tape.gradient(loss_G, model_G.trainable_weights)
+                optimizer_G.apply_gradients(zip(grads, model_G.trainable_weights))
+                #train_acc_metric.update_state(target, logits)
+                return output, loss_G
+
+            output, loss_G = train_on_batch( image_s, image_t )
 
             #====================================================
             # 学習過程の表示
@@ -134,24 +151,59 @@ if __name__ == '__main__':
                 pass
 
                 # loss
+                print( "epoch={}, step={}, loss_G={:.5f}".format(epoch, step, loss_G) )
                 with board_train.as_default():
                     tf.summary.scalar("G/loss_G", loss_G, step=step+1, description="生成器の全loss")
 
                 # visual images
                 with board_train.as_default():
-                    tf.summary.image( "train/image_s", image_s, step=step+1 )
-                    tf.summary.image( "train/image_t", image_t, step=step+1 )
-
+                    #tf.summary.image( "train/image_s", image_s, step=step+1 )
+                    #tf.summary.image( "train/image_t", image_t, step=step+1 )
                     visuals = [
-                        [ image_s, image_t, ],
+                        [ image_s, image_t, output ],
                     ]
-                    board_add_images(board_train, 'train', visuals, step+1, offset = False )
+                    board_add_images(board_train, 'train', visuals, step+1 )
 
             #====================================================
             # valid データでの処理
             #====================================================
             if( step != 0 and ( step % args.n_display_valid_step == 0 ) ):
-                pass
+                loss_G_total = 0
+                n_valid_loop = 0                
+                for i, (image_s, image_t) in enumerate(ds_valid):
+                    #---------------------------------
+                    # 推論処理
+                    #---------------------------------
+                    @tf.function
+                    def eval_on_batch(input, target):
+                        # スコープ以下を自動微分計算
+                        with tf.GradientTape() as tape:
+                            # モデルの forward 処理
+                            output = model_G(input, training=False)
+
+                            # 損失関数の計算
+                            loss_G = loss_fn(target, output)
+
+                        return output, loss_G
+
+                    output, loss_G = eval_on_batch( image_s, image_t )
+                    loss_G_total += loss_G
+
+                    #---------------------------------
+                    # 生成画像表示
+                    #---------------------------------
+                    if( i <= args.n_display_valid ):
+                        with board_train.as_default():
+                            visuals = [
+                                [ image_s, image_t, output ],
+                            ]
+                            board_add_images(board_valid, 'valid/{}'.format(i), visuals, step+1 )                            
+
+                    n_valid_loop += 1
+
+                # loss 値表示
+                with board_train.as_default():
+                    tf.summary.scalar("G/loss_G", loss_G_total/n_valid_loop, step=step+1, description="生成器の全loss")
 
             step += 1
             iters += args.batch_size

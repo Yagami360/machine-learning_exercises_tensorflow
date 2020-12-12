@@ -13,7 +13,7 @@ import tensorflow as tf
 #====================================================
 # 画像関連
 #====================================================
-def load_image_tsr_from_file( image_path, normalize = True, offset = False ):
+def load_image_tsr_from_file( image_path, normalize = True, offset = True ):
     image_data = tf.io.read_file(image_path)
     image_tsr = tf.image.decode_image(image_data, expand_animations = False)    # gif 以外読み込み
     if( normalize ):
@@ -23,7 +23,7 @@ def load_image_tsr_from_file( image_path, normalize = True, offset = False ):
 
     return image_tsr
 
-def sava_image_tsr( image_tsr, image_path, normalize = True, offset = False ):
+def sava_image_tsr( image_tsr, image_path, normalize = True, offset = True ):
     #print( "[image_tsr] dtype={}, min={}, max={}".format(image_tsr.dtype, np.min(image_tsr.numpy()), np.max(image_tsr.numpy())) )
     if( offset ):
         image_tsr = ( image_tsr + 1.0 ) * 0.5
@@ -98,6 +98,25 @@ def board_add_images(board, tag_name, img_tensors_list, step_count, n_max_images
         tf.summary.image('%s/%03d' % (tag_name, i), tf.expand_dims(img, 0), step=step_count, description=description )
 
     return
+
+#====================================================
+# TFRecord 関数
+#====================================================
+def write_tfrecord_from_file( load_file_names, save_file_name = "images.tfrec" ):
+    dataset = tf.data.Dataset.from_tensor_slices(load_file_names).map(tf.io.read_file)
+    writer = tf.data.experimental.TFRecordWriter(save_file_name)
+    writer.write(dataset)
+    return
+
+def write_tfrecord_from_dataset( dataset, save_file_name = "images.tfrec" ):
+    dataset.map(tf.io.read_file)
+    writer = tf.data.experimental.TFRecordWriter(save_file_name)
+    writer.write(dataset)
+    return
+
+def load_tfrecord_from_file( file_names ):
+    dataset = tf.data.TFRecordDataset(file_names)
+    return dataset
 
 #====================================================
 # その他
