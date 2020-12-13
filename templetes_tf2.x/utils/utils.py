@@ -102,6 +102,7 @@ def board_add_images(board, tag_name, img_tensors_list, step_count, n_max_images
 #====================================================
 # TFRecord 関数
 #====================================================
+"""
 def write_tfrecord_from_file( load_file_names, save_file_name = "images.tfrec" ):
     dataset = tf.data.Dataset.from_tensor_slices(load_file_names).map(tf.io.read_file)
     writer = tf.data.experimental.TFRecordWriter(save_file_name)
@@ -117,6 +118,7 @@ def write_tfrecord_from_dataset( dataset, save_file_name = "images.tfrec" ):
 def load_tfrecord_from_file( file_names ):
     dataset = tf.data.TFRecordDataset(file_names)
     return dataset
+"""
 
 #====================================================
 # その他

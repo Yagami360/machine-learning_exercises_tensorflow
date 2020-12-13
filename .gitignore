@@ -9,3 +9,5 @@
 *.tfevents.*
 *.pyc
 *.tfrec
+*.tfrecord
+*.tfrecords
