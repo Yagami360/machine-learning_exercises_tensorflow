@@ -86,6 +86,8 @@ if __name__ == '__main__':
     if( args.debug ):
         print( "n_trains : ", n_trains )
         print( "n_valids : ", n_valids )
+        print( "ds_train : ", ds_train )
+        print( "ds_valid : ", ds_valid )
 
     #================================
     # モデルの構造を定義する。

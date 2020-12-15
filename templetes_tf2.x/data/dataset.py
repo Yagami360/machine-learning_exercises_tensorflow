@@ -4,6 +4,7 @@ import random
 from PIL import Image
 import cv2
 import matplotlib.pyplot as plt
+import io
 
 # sklearn
 from sklearn.model_selection import train_test_split
@@ -51,19 +52,11 @@ def load_dataset(
             write_tfrecord_from_files( valid_image_s_names_path, valid_image_t_names_path, os.path.join(dataset_dir, "tfrecord", "valid.tfrecord") )
 
         # tfrecord の読み込み
-        ds_train = load_tfrecord_from_file_tf2( os.path.join(dataset_dir, "tfrecord", "train.tfrecord") )
-        ds_valid = load_tfrecord_from_file_tf2( os.path.join(dataset_dir, "tfrecord", "valid.tfrecord") )
-
-        ds_train = ds_train.shuffle(n_trains).batch(batch_size)
-        ds_valid = ds_valid.batch(1)
+        ds_train = load_tfrecord_from_file_tf2( os.path.join(dataset_dir, "tfrecord", "train.tfrecord") ).shuffle(n_trains).batch(batch_size)
+        ds_valid = load_tfrecord_from_file_tf2( os.path.join(dataset_dir, "tfrecord", "valid.tfrecord") ).batch(1)
         if( use_prefeatch ):
             ds_train = ds_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
             ds_valid = ds_valid.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-
-        print( "ds_train : ", ds_train )
-        for item in ds_train:
-            print( "[ds_train] item", item )
-
     else:
         # tf.data.Dataset の構築
         ds_train_s = tf.data.Dataset.from_tensor_slices(train_image_s_names_path)
@@ -84,12 +77,6 @@ def load_dataset(
             ds_train = ds_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
             ds_valid = ds_valid.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
-        """
-        print( "ds_train : ", ds_train )        # <PrefetchDataset shapes: ((None, 128, 128, None), (None, 128, 128, None)), types: (tf.float32, tf.float32)>
-        for item in ds_train:
-            print( "[ds_train] item", item )    # <tf.Tensor: id=475, shape=(4, 128, 128, 3), dtype=float32, numpy=array([[[[-1., -1., -1.], ...
-        """
-
     return ds_train, ds_valid, n_trains, n_valids
 
 
@@ -101,8 +88,13 @@ def write_tfrecord_from_files( image_s_names, image_t_names, tfrecord_name, imag
             image_t_pillow = Image.open(image_t_name).convert("RGB").resize((image_width, image_height))
 
             # 画像は byte 型に変換
-            image_s_byte = np.array(image_s_pillow).tobytes()
-            image_t_byte = np.array(image_t_pillow).tobytes()
+            bytes_io = io.BytesIO()
+            image_s_pillow.save(bytes_io, format='PNG')
+            image_s_byte = bytes_io.getvalue()
+
+            bytes_io = io.BytesIO()
+            image_t_pillow.save(bytes_io, format='PNG')
+            image_t_byte = bytes_io.getvalue()
 
             # tf.Example の作成 / TFRecordは、tf.train.Example を１つのレコードの単位として書き込む。
             example = tf.train.Example(
@@ -156,11 +148,11 @@ def load_tfrecord_from_file_tf1( tfrecord_name ):
     dataset = tf.data.Dataset.zip((dataset_s, dataset_t))
     return dataset
 
-def load_tfrecord_from_file_tf2( tfrecord_name, display_tfrecord = True ):
-    def parse_example(example):
+def load_tfrecord_from_file_tf2( tfrecord_name, display_tfrecord = False ):
+    def parse_example(example_proto):
         # tf.parse_single_example を使用して tfrecord を読み込む
         features = tf.io.parse_single_example(
-            example,
+            example_proto,
             # 読み込み特徴量のディクショナリ    
             features = {
                 "image_s" : tf.io.FixedLenFeature([], tf.string),
@@ -169,44 +161,33 @@ def load_tfrecord_from_file_tf2( tfrecord_name, display_tfrecord = True ):
                 "image_width" : tf.io.FixedLenFeature([], tf.int64),
             }
         )
-        
-        # 画像 tensor に変換
-        #image_height = tf.cast(features["image_height"], tf.int32)
-        #image_width = tf.cast(features["image_width"], tf.int32)
-        image_height = features["image_height"]
-        image_width = features["image_width"]
-        #print( "image_height : ", image_height )
-
-        image_s_tsr = tf.io.decode_raw(features['image_s'], tf.float32)
-        image_t_tsr = tf.io.decode_raw(features['image_t'], tf.float32)
-        #print( "image_s_tsr.shape : ", image_s_tsr.shape )
-        #print( "image_t_tsr.shape : ", image_t_tsr.shape )
-        
-        image_s_tsr = tf.reshape(image_s_tsr, [image_height, image_width, 3])
-        image_t_tsr = tf.reshape(image_t_tsr, [image_height, image_width, 3])
-        #image_s_tsr = tf.reshape(image_s_tsr, [128, 128, 3])
-        #image_t_tsr = tf.reshape(image_t_tsr, [128, 128, 3])
-        #image_s_tsr = tf.reshape(image_s_tsr, tf.stack([image_height, image_width,]))
-        #image_t_tsr = tf.reshape(image_t_tsr, tf.stack([image_height, image_width,]))
-        print( "image_s_tsr.shape : ", image_s_tsr.shape )
-        print( "image_t_tsr.shape : ", image_t_tsr.shape )
-
-        image_s_tsr = ( image_s_tsr / 255 ) * 2 - 1.0
-        image_t_tsr = ( image_t_tsr / 255 ) * 2 - 1.0
-
-        # 抽出データを return
-        return image_s_tsr, image_t_tsr
+        return features
 
     # tfrecord ファイルの中身を表示
-    """
     if( display_tfrecord ):
         for example in tf.compat.v1.io.tf_record_iterator(tfrecord_name): 
-            result = tf.train.Example.FromString(example)
-            print( "result : ", result )
-    """
-    
-    # map() で tf.parse_single_example を使用して tfrecord を読み込み処理 ＋ 前処理を適用
+            tfrecord_str = tf.train.Example.FromString(example)
+            print( "tfrecord_str : \n", tfrecord_str )
+
+    # map() で tf.parse_single_example を使用して tfrecord を読み込み処理 
     dataset = tf.data.TFRecordDataset(tfrecord_name).map(parse_example, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    # 読み込んだ tfrecord ファイルのデータに対して前処理を適用 ＆ データローダーの形式変換
+    image_s_tsr_list = []
+    image_t_tsr_list = []
+    for features in dataset:
+        image_s_tsr = tf.io.decode_png(features['image_s'], dtype = tf.uint8)
+        image_t_tsr = tf.io.decode_png(features['image_t'], dtype = tf.uint8)
+        image_s_tsr = tf.cast(image_s_tsr, tf.float32 )
+        image_t_tsr = tf.cast(image_t_tsr, tf.float32 )
+        image_s_tsr = ( image_s_tsr / 255 ) * 2 - 1.0
+        image_t_tsr = ( image_t_tsr / 255 ) * 2 - 1.0
+        image_s_tsr_list.append( image_s_tsr )
+        image_t_tsr_list.append( image_t_tsr )
+
+    dataset_s = tf.data.Dataset.from_tensor_slices(image_s_tsr_list)
+    dataset_t = tf.data.Dataset.from_tensor_slices(image_t_tsr_list)
+    dataset = tf.data.Dataset.zip((dataset_s, dataset_t))
     return dataset
 
 #@tf.function
