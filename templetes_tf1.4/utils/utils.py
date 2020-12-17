@@ -14,22 +14,53 @@ import tensorflow as tf
 # 画像関連
 #====================================================
 def load_image_tsr_from_file( image_path, normalize = True, offset = True ):
-    image_data = tf.io.read_file(image_path)
-    image_tsr = tf.image.decode_image(image_data, expand_animations = False)    # gif 以外読み込み
-    if( normalize ):
-        image_tsr = tf.cast(image_tsr, tf.float32) / 255.0
-        if( offset ):
-            image_tsr = image_tsr * 2.0 - 1.0
+    if( int(tf.__version__.split(".")[0]) >= 2 ):
+        image_data = tf.io.read_file(image_path)
+        image_tsr = tf.image.decode_image(image_data, expand_animations = False)    # gif 以外読み込み
+        if( normalize ):
+            image_tsr = tf.cast(image_tsr, tf.float32) / 255.0
+            if( offset ):
+                image_tsr = image_tsr * 2.0 - 1.0
+    else:
+        with tf.Session() as sess:
+            read_file_op = tf.read_file(image_path)
+            decode_jpeg_op = tf.image.decode_jpeg(read_file_op, channels=3)
+            image_np = sess.run(decode_jpeg_op)
+            image_tsr = tf.convert_to_tensor(image_np)
+            if( normalize ):
+                norm_op = tf.cast(image_tsr, tf.float32) / 255.0
+                image_np = sess.run(norm_op)
+                image_tsr = tf.convert_to_tensor(image_np)
+                if( offset ):
+                    offset_op = image_tsr * 2.0 - 1.0
+                    image_np = sess.run(offset_op)
+                    image_tsr = tf.convert_to_tensor(image_np)
 
     return image_tsr
 
 def sava_image_tsr( image_tsr, image_path, normalize = True, offset = True ):
-    if( offset ):
-        image_tsr = ( image_tsr + 1.0 ) * 0.5
-    if( normalize ):
-        image_tsr = tf.cast(image_tsr * 255, tf.uint8)
+    if( int(tf.__version__.split(".")[0]) >= 2 ):
+        if( offset ):
+            image_tsr = ( image_tsr + 1.0 ) * 0.5
+        if( normalize ):
+            image_tsr = tf.cast(image_tsr * 255, tf.uint8)
 
-    image_np = image_tsr.numpy()
+        image_np = image_tsr.numpy()
+    else:
+        with tf.Session() as sess:
+            if( offset ):
+                offset_op = ( image_tsr + 1.0 ) * 0.5
+                image_np = sess.run(offset_op)
+                if( normalize ):
+                    normalize_op = tf.cast(image_np * 255, tf.uint8)
+                    image_np = sess.run(normalize_op)
+            else:
+                if( normalize ):
+                    normalize_op = tf.cast(image_tsr * 255, tf.uint8)
+                    image_np = sess.run(normalize_op)
+                else:               
+                    image_np = image_tsr.numpy()
+
     Image.fromarray(image_np).save(image_path)
     return
 
@@ -39,7 +70,13 @@ def resize_image_tsr( image_tsr, image_height, image_width, method = tf.image.Re
         method
             ResizeMethod.BILINEAR, ResizeMethod.NEAREST_NEIGHBOR, ResizeMethod.BICUBIC, ResizeMethod.AREA
     """
-    image_tsr = tf.image.resize( image_tsr, [image_height, image_width], method )
+    if( int(tf.__version__.split(".")[0]) >= 2 ):
+        image_tsr = tf.image.resize( image_tsr, [image_height, image_width], method )
+    else:
+        with tf.Session() as sess:
+            resize_op = tf.image.resize_images( image_tsr, [image_height, image_width], method )
+            image_tsr = sess.run(resize_op)
+
     return image_tsr
 
 #====================================================
