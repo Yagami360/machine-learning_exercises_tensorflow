@@ -66,25 +66,11 @@ if __name__ == '__main__':
     # Session 開始
     sess = tf.Session()
 
-    # 変数初期化
-    init_op = tf.global_variables_initializer()
-    sess.run(init_op)
-
     # 実行 Device の設定
     pass
 
     # seed 値の固定
     set_random_seed(args.seed)
-
-    # tensorboard 出力
-    if( int(tf.__version__.split(".")[0]) >= 2 ):
-        board_train = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name) )
-        board_valid = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
-        board_train.set_as_default()
-        #board_valid.set_as_default()
-    else:
-        board_train = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name), sess.graph )
-        board_valid = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name + "_valid"), sess.graph )
 
     #================================
     # データセットの読み込み
@@ -93,19 +79,45 @@ if __name__ == '__main__':
     ds_train = Dataset( args.dataset_dir, image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = args.batch_size, use_tfrecord = args.use_tfrecord )
 
     #================================
+    # 変数とプレースホルダを設定
+    #================================
+    image_s_holder = tf.placeholder(tf.float32, [args.batch_size, args.image_height, args.image_width, 1], name = "image_s_holder" )
+    image_t_holder = tf.placeholder(tf.float32, [args.batch_size, args.image_height, args.image_width, 3], name = "image_t_holder")
+    #image_s_holder = tf.placeholder(tf.float32, [None, args.image_height, args.image_width, 1] )
+    #image_t_holder = tf.placeholder(tf.float32, [None, args.image_height, args.image_width, 3] )
+
+    #================================
     # モデルの構造を定義する。
     #================================
     model_G = TempleteNetworks(out_dim=3)
-
-    #================================
-    # optimizer の設定
-    #================================
-    #optimizer_G = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 )
+    output_op = model_G(image_s_holder)
 
     #================================
     # loss 関数の設定
     #================================
-    #loss_fn = tf.keras.losses.MeanSquaredError()
+    with tf.name_scope('loss'):
+        loss_op = tf.reduce_mean( tf.abs(image_t_holder - output_op) )
+
+    #================================
+    # optimizer の設定
+    #================================
+    with tf.name_scope('optimizer'):
+        optimizer_op = tf.train.AdamOptimizer( learning_rate=args.lr, beta1=args.beta1, beta2=args.beta2 )
+        train_op = optimizer_op.minimize(loss_op)
+
+    #================================
+    # tensorboard 出力
+    #================================
+    if( int(tf.__version__.split(".")[0]) >= 2 ):
+        board_train = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name) )
+        board_valid = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
+        board_train.set_as_default()
+        #board_valid.set_as_default()
+    else:
+        board_train = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name), sess.graph )
+        board_valid = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name + "_valid"), sess.graph )
+        tf.summary.scalar("G/loss_G", loss_op)
+        board_merge_op = tf.summary.merge_all()
 
     #================================
     # モデルの学習
@@ -115,7 +127,11 @@ if __name__ == '__main__':
     step = 0
     iters = 0
 
+    # 変数初期化
+    sess.run( tf.global_variables_initializer() )
+
     for epoch in tqdm( range(args.n_epoches), desc = "epoches" ):
+        # データセット初期化
         sess.run(ds_train.init_iter_op)
         while True:
             try:
@@ -128,28 +144,39 @@ if __name__ == '__main__':
                 #====================================================
                 # 学習処理
                 #====================================================
-                output = image_s
-                loss_G = 0
+                output = sess.run(train_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                if( args.debug and n_prints > 0 ):
+                    print( "output", output )
+                    print("[output] shape={}, dtype={}, min={}, max={}".format(output.shape, output.dtype, np.min(output), np.max(output)))
+
+                # 損失関数の計算
+                loss_G = sess.run(loss_op, feed_dict = {image_t_holder: output, image_t_holder: image_t} )
 
                 #====================================================
                 # 学習過程の表示
                 #====================================================
                 if( step == 0 or ( step % args.n_diaplay_step == 0 ) ):
+                    #summary = sess.run(board_merge_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+
                     # lr
                     pass
 
                     # loss
                     print( "epoch={}, step={}, loss_G={:.5f}".format(epoch, step, loss_G) )
-                    #tf.summary.scalar("G/loss_G", loss_G, step=step+1)
-                    tf.summary.scalar("G/loss_G", loss_G) # [ToDO] step 出力
+
 
                     # visual images
+                    pass
                     #tf.summary.image( "train/image_s", image_s, step=step+1 )
                     #tf.summary.image( "train/image_t", image_t, step=step+1 )
+                    """
                     visuals = [
                         [ image_s, image_t, output ],
                     ]
                     board_add_images(board_train, 'train', visuals, step+1 )
+                    """
+
+                    writer.add_summary(summary)
 
             except tf.errors.OutOfRangeError:
                 print('finished!')

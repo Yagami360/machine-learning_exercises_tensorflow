@@ -210,32 +210,34 @@ class Dataset(object):
         image_height = 128, image_width = 128, n_channels = 3, batch_size = 4,
         shuffle = True, use_prefeatch = True, n_workers = 4, use_tfrecord = False
     ):
-        image_s_dir = os.path.join( dataset_dir, "image_s" )
-        image_t_dir = os.path.join( dataset_dir, "image_t" )
-        image_s_names = sorted( [f for f in os.listdir(image_s_dir) if f.endswith(IMG_EXTENSIONS)], key=numerical_sort )
-        image_t_names = sorted( [f for f in os.listdir(image_t_dir) if f.endswith(IMG_EXTENSIONS)], key=numerical_sort )
-        image_s_names_path = [ os.path.join(image_s_dir, image_s_name) for image_s_name in image_s_names ]
-        image_t_names_path = [ os.path.join(image_t_dir, image_t_name) for image_t_name in image_t_names ]
-        self.n_data = len(image_s_names_path)
+        with tf.name_scope(self.__class__.__name__):
+            image_s_dir = os.path.join( dataset_dir, "image_s" )
+            image_t_dir = os.path.join( dataset_dir, "image_t" )
+            image_s_names = sorted( [f for f in os.listdir(image_s_dir) if f.endswith(IMG_EXTENSIONS)], key=numerical_sort )
+            image_t_names = sorted( [f for f in os.listdir(image_t_dir) if f.endswith(IMG_EXTENSIONS)], key=numerical_sort )
+            image_s_names_path = [ os.path.join(image_s_dir, image_s_name) for image_s_name in image_s_names ]
+            image_t_names_path = [ os.path.join(image_t_dir, image_t_name) for image_t_name in image_t_names ]
+            self.n_data = len(image_s_names_path)
 
-        # dataloader の構築
-        dataset_s = tf.data.Dataset.from_tensor_slices(image_s_names_path).map(self.preprocessing, num_parallel_calls=n_workers )
-        dataset_t = tf.data.Dataset.from_tensor_slices(image_t_names_path).map(self.preprocessing, num_parallel_calls=n_workers )
-        #dataset_s = tf.data.Dataset.from_tensor_slices(image_s_names_path).map(self.data_augument, num_parallel_calls=n_workers )
-        #dataset_t = tf.data.Dataset.from_tensor_slices(image_t_names_path).map(self.data_augument, num_parallel_calls=n_workers )
-        self.dataset = tf.data.Dataset.zip((dataset_s,dataset_t))
-        if( shuffle ):
-            self.dataset = self.dataset.shuffle(self.n_data)
-        self.dataset = self.dataset.batch(batch_size)
+            # dataloader の構築
+            dataset_s = tf.data.Dataset.from_tensor_slices(image_s_names_path).map(self.preprocessing, num_parallel_calls=n_workers )
+            dataset_t = tf.data.Dataset.from_tensor_slices(image_t_names_path).map(self.preprocessing, num_parallel_calls=n_workers )
+            #dataset_s = tf.data.Dataset.from_tensor_slices(image_s_names_path).map(self.data_augument, num_parallel_calls=n_workers )
+            #dataset_t = tf.data.Dataset.from_tensor_slices(image_t_names_path).map(self.data_augument, num_parallel_calls=n_workers )
+            self.dataset = tf.data.Dataset.zip((dataset_s,dataset_t))
+            if( shuffle ):
+                self.dataset = self.dataset.shuffle(self.n_data)
+            self.dataset = self.dataset.batch(batch_size)
 
-        # iterator の作成
-        self.iterator = self.dataset.make_initializable_iterator()
+            # iterator の作成
+            self.iterator = self.dataset.make_initializable_iterator()
 
-        # イテレータの初期化オペレーション
-        self.init_iter_op = self.iterator.initializer
+            # イテレータの初期化オペレーション
+            self.init_iter_op = self.iterator.initializer
 
-        # ミニバッチデータ（データセットの次の要素）を取り出すオペレーション（Op）
-        self.batch_op = self.iterator.get_next()
+            # ミニバッチデータ（データセットの次の要素）を取り出すオペレーション（Op）
+            self.batch_op = self.iterator.get_next()
+
         return
 
     def __len__(self):
