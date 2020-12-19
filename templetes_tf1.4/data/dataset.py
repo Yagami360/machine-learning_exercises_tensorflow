@@ -206,13 +206,13 @@ def preprocessing( image_path, image_height = 128, image_width = 128, offset = T
 
 class Dataset(object):
     def __init__(
-        self, dataset_dir, 
+        self, dataset_dir, datamode = "train",
         image_height = 128, image_width = 128, n_channels = 3, batch_size = 4,
-        shuffle = True, use_prefeatch = True, n_workers = 4, use_tfrecord = False
+        shuffle = True, use_prefeatch = True, n_workers = 4, use_tfrecord = False, data_augument = False, 
     ):
         with tf.name_scope(self.__class__.__name__):
-            image_s_dir = os.path.join( dataset_dir, "image_s" )
-            image_t_dir = os.path.join( dataset_dir, "image_t" )
+            image_s_dir = os.path.join( dataset_dir, datamode, "image_s" )
+            image_t_dir = os.path.join( dataset_dir, datamode, "image_t" )
             image_s_names = sorted( [f for f in os.listdir(image_s_dir) if f.endswith(IMG_EXTENSIONS)], key=numerical_sort )
             image_t_names = sorted( [f for f in os.listdir(image_t_dir) if f.endswith(IMG_EXTENSIONS)], key=numerical_sort )
             image_s_names_path = [ os.path.join(image_s_dir, image_s_name) for image_s_name in image_s_names ]
@@ -222,8 +222,12 @@ class Dataset(object):
             # dataloader の構築
             dataset_s = tf.data.Dataset.from_tensor_slices(image_s_names_path).map(self.preprocessing, num_parallel_calls=n_workers )
             dataset_t = tf.data.Dataset.from_tensor_slices(image_t_names_path).map(self.preprocessing, num_parallel_calls=n_workers )
-            #dataset_s = tf.data.Dataset.from_tensor_slices(image_s_names_path).map(self.data_augument, num_parallel_calls=n_workers )
-            #dataset_t = tf.data.Dataset.from_tensor_slices(image_t_names_path).map(self.data_augument, num_parallel_calls=n_workers )
+            """
+            if( data_augument ):
+                dataset_s = tf.data.Dataset.from_tensor_slices(image_s_names_path).map(self.data_augument, num_parallel_calls=n_workers )
+                dataset_t = tf.data.Dataset.from_tensor_slices(image_t_names_path).map(self.data_augument, num_parallel_calls=n_workers )
+            """
+
             self.dataset = tf.data.Dataset.zip((dataset_s,dataset_t))
             if( shuffle ):
                 self.dataset = self.dataset.shuffle(self.n_data)
@@ -243,9 +247,17 @@ class Dataset(object):
     def __len__(self):
         return len(self.n_data)
 
+    def __iter__(self):
+        return self
+
+    """
+    def __next__(self):
+        return
+    """
+
     #@tf.function
-    def preprocessing( self, image_path, image_height = 128, image_width = 128, normalize = True, offset = True ):
-        preprocess_op = tf.image.decode_jpeg(tf.read_file(image_path))
+    def preprocessing( self, image_path, image_height = 128, image_width = 128, channels = 3, normalize = True, offset = True ):
+        preprocess_op = tf.image.decode_jpeg(tf.read_file(image_path), channels = channels )
         preprocess_op = tf.image.resize_images(preprocess_op, (image_height, image_width), method = tf.image.ResizeMethod.BILINEAR )
         preprocess_op = tf.cast(preprocess_op, tf.float32) / 255
         if( offset ):

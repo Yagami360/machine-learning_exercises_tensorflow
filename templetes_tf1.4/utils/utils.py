@@ -82,6 +82,7 @@ def resize_image_tsr( image_tsr, image_height, image_width, method = tf.image.Re
 #====================================================
 # TensorBoard への出力関連
 #====================================================
+"""
 def tensor_for_board(img_tensor, normalize = True, offset = True):
     # map into [0,1]
     if( normalize ):
@@ -133,6 +134,7 @@ def board_add_images(board, tag_name, img_tensors_list, step_count, n_max_images
         tf.summary.image('%s/%03d' % (tag_name, i), tf.expand_dims(img, 0), step=step_count, description=description )
 
     return
+"""
 
 #====================================================
 # その他

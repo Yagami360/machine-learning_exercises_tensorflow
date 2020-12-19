@@ -15,7 +15,7 @@ fi
 
 python train.py \
     --exper_name ${EXPER_NAME} \
-    --n_diaplay_step 10 --n_display_valid_step 10 --n_save_epoches 100 \
+    --n_diaplay_step 10 --n_display_valid_step 10 --n_save_epoches 10000 \
     --debug
 
 #    --use_tfrecord \

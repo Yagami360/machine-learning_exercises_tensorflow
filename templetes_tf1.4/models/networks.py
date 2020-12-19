@@ -9,8 +9,10 @@ class TempleteNetworks():
     """
     ダミー用のネットワーク
     """
-    def __init__( self, out_dim = 1 ):
+    def __init__( self, in_dim = 3, out_dim = 3 ):
         super(TempleteNetworks, self).__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
         return
 
     def init_weight_variable( self, input_shape ):
@@ -56,7 +58,7 @@ class TempleteNetworks():
         #----------------------------------------------------------------------
         with tf.name_scope( self.__class__.__name__ ):
             # 重みの Variable の list に、１つ目の畳み込み層の重み（カーネル）を追加
-            weight = self.init_weight_variable( input_shape = [ 1, 1, 1, 3 ] ) 
+            weight = self.init_weight_variable( input_shape = [ 1, 1, self.in_dim, self.out_dim ] ) 
             
             # 畳み込み層のオペレーター
             conv_op1 = tf.nn.conv2d(

@@ -16,7 +16,7 @@ from data.dataset import Dataset
 from models.networks import TempleteNetworks
 from utils.utils import set_random_seed, numerical_sort
 from utils.utils import sava_image_tsr
-from utils.utils import board_add_image, board_add_images
+#from utils.utils import board_add_image, board_add_images
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -76,15 +76,14 @@ if __name__ == '__main__':
     # データセットの読み込み
     #================================    
     # 学習用データセットとテスト用データセットの設定
-    ds_train = Dataset( args.dataset_dir, image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = args.batch_size, use_tfrecord = args.use_tfrecord )
+    ds_train = Dataset( args.dataset_dir, datamode = "train", image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = args.batch_size, shuffle = True, use_tfrecord = args.use_tfrecord, data_augument = args.data_augument )
+    ds_valid = Dataset( args.dataset_dir, datamode = "valid", image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = 1, shuffle = False, use_tfrecord = args.use_tfrecord, data_augument = False )
 
     #================================
     # 変数とプレースホルダを設定
     #================================
-    image_s_holder = tf.placeholder(tf.float32, [args.batch_size, args.image_height, args.image_width, 1], name = "image_s_holder" )
-    image_t_holder = tf.placeholder(tf.float32, [args.batch_size, args.image_height, args.image_width, 3], name = "image_t_holder")
-    #image_s_holder = tf.placeholder(tf.float32, [None, args.image_height, args.image_width, 1] )
-    #image_t_holder = tf.placeholder(tf.float32, [None, args.image_height, args.image_width, 3] )
+    image_s_holder = tf.placeholder(tf.float32, [None, args.image_height, args.image_width, 3], name = "image_s_holder" )
+    image_t_holder = tf.placeholder(tf.float32, [None, args.image_height, args.image_width, 3], name = "image_t_holder" )
 
     #================================
     # モデルの構造を定義する。
@@ -115,8 +114,15 @@ if __name__ == '__main__':
         #board_valid.set_as_default()
     else:
         board_train = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name), sess.graph )
-        board_valid = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name + "_valid"), sess.graph )
-        tf.summary.scalar("G/loss_G", loss_op)
+        board_valid = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
+
+        board_loss_op = tf.summary.scalar("G/loss_G", loss_op)
+        board_train_image_s_op = tf.summary.image( 'train/image_s', image_s_holder, max_outputs = args.batch_size )
+        board_train_image_t_op = tf.summary.image( 'train/image_t', image_t_holder, max_outputs = args.batch_size )
+        board_train_output_op = tf.summary.image( 'train/output', image_t_holder, max_outputs = args.batch_size )
+        board_valid_image_s_op = tf.summary.image( 'valid/image_s', image_s_holder )
+        board_valid_image_t_op = tf.summary.image( 'valid/image_t', image_t_holder )
+        board_valid_output_op = tf.summary.image( 'valid/output', image_t_holder )
         board_merge_op = tf.summary.merge_all()
 
     #================================
@@ -137,6 +143,11 @@ if __name__ == '__main__':
             try:
                 # ミニバッチデータの取り出し
                 image_s, image_t = sess.run(ds_train.batch_op)
+
+                # 一番最後のミニバッチループで、バッチサイズに満たない場合は無視する（後の計算で、shape の不一致をおこすため）
+                if image_s.shape[0] != args.batch_size:
+                    break
+
                 if( args.debug and n_prints > 0 ):
                     print("[image_s] shape={}, dtype={}, min={}, max={}".format(image_s.shape, image_s.dtype, np.min(image_s), np.max(image_s)))
                     print("[image_t] shape={}, dtype={}, min={}, max={}".format(image_t.shape, image_t.dtype, np.min(image_t), np.max(image_t)))
@@ -144,31 +155,26 @@ if __name__ == '__main__':
                 #====================================================
                 # 学習処理
                 #====================================================
-                output = sess.run(train_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                _, output, loss_G = sess.run([train_op, output_op, loss_op], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
                 if( args.debug and n_prints > 0 ):
-                    print( "output", output )
                     print("[output] shape={}, dtype={}, min={}, max={}".format(output.shape, output.dtype, np.min(output), np.max(output)))
-
-                # 損失関数の計算
-                loss_G = sess.run(loss_op, feed_dict = {image_t_holder: output, image_t_holder: image_t} )
 
                 #====================================================
                 # 学習過程の表示
                 #====================================================
                 if( step == 0 or ( step % args.n_diaplay_step == 0 ) ):
-                    #summary = sess.run(board_merge_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
-
                     # lr
                     pass
 
                     # loss
                     print( "epoch={}, step={}, loss_G={:.5f}".format(epoch, step, loss_G) )
+                    board_train.add_summary(sess.run(board_loss_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} ), global_step=step)
 
+                    # 画像表示
+                    board_train.add_summary(sess.run(board_train_image_s_op, feed_dict = {image_s_holder: image_s} ), global_step=step)
+                    board_train.add_summary(sess.run(board_train_image_t_op, feed_dict = {image_t_holder: image_t} ), global_step=step)
+                    board_train.add_summary(sess.run(board_train_output_op, feed_dict = {image_t_holder: output} ), global_step=step)
 
-                    # visual images
-                    pass
-                    #tf.summary.image( "train/image_s", image_s, step=step+1 )
-                    #tf.summary.image( "train/image_t", image_t, step=step+1 )
                     """
                     visuals = [
                         [ image_s, image_t, output ],
@@ -176,41 +182,45 @@ if __name__ == '__main__':
                     board_add_images(board_train, 'train', visuals, step+1 )
                     """
 
-                    writer.add_summary(summary)
-
             except tf.errors.OutOfRangeError:
-                print('finished!')
                 break
 
             #====================================================
             # valid データでの処理
             #====================================================
             if( step != 0 and ( step % args.n_display_valid_step == 0 ) ):
+                sess.run(ds_valid.init_iter_op)
+
                 loss_G_total = 0
                 n_valid_loop = 0
-                """                
-                for i, (image_s, image_t) in enumerate(ds_valid):
-                    #---------------------------------
-                    # 推論処理
-                    #---------------------------------
-                    pass
+                for i in range(100000):
+                    try:
+                        # ミニバッチデータの取り出し
+                        image_s, image_t = sess.run(ds_valid.batch_op)
 
-                    #---------------------------------
-                    # 生成画像表示
-                    #---------------------------------
-                    if( i <= args.n_display_valid ):
-                        with board_train.as_default():
-                            visuals = [
-                                [ image_s, image_t, output ],
-                            ]
-                            board_add_images(board_valid, 'valid/{}'.format(i), visuals, step+1 )                            
+                        # 出力画像と loss 値取得
+                        output, loss_G = sess.run([output_op, loss_op], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                        loss_G_total += loss_G
 
-                    n_valid_loop += 1
+                        # 画像表示
+                        if( i <= args.n_display_valid ):
+                            #board_valid_image_s_op = tf.summary.image( 'valid/image_s/{}'.format(i), image_s_holder, max_outputs=1 )
+                            #board_valid_image_t_op = tf.summary.image( 'valid/image_t/{}'.format(i), image_t_holder, max_outputs=1 )
+                            #board_valid_output_op = tf.summary.image( 'valid/output/{}'.format(i), image_t_holder, max_outputs=1 )
 
-                # loss 値表示
-                with board_train.as_default():
-                    tf.summary.scalar("G/loss_G", loss_G_total/n_valid_loop, step=step+1, description="生成器の全loss")
-                """
+                            board_valid.add_summary(sess.run(board_valid_image_s_op, feed_dict = {image_s_holder: image_s} ), global_step=step)
+                            board_valid.add_summary(sess.run(board_valid_image_t_op, feed_dict = {image_t_holder: image_t} ), global_step=step)
+                            board_valid.add_summary(sess.run(board_valid_output_op, feed_dict = {image_t_holder: output} ), global_step=step)
+        
+                        n_valid_loop += 1
+
+                    except tf.errors.OutOfRangeError:
+                        break
+
+                # loss 値出力 : [ToDo] loss total の出力
+                board_valid.add_summary(sess.run(board_loss_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} ), global_step=step)
+                #board_loss_G_total_op = tf.summary.scalar("G/loss_G", loss_G_total/n_valid_loop)
+                #board_valid.add_summary(sess.run(board_loss_G_total_op), global_step=step)
 
             step += 1
             iters += args.batch_size
@@ -223,3 +233,7 @@ if __name__ == '__main__':
             pass
 
     print("Finished Training Loop.")
+
+    board_train.close()
+    board_valid.close()
+    sess.close()
