@@ -10,6 +10,7 @@ warnings.simplefilter('ignore')
 
 # TensorFlow ライブラリ
 import tensorflow as tf
+from tensorflow.python.client import device_lib
 
 # 自作モジュール
 from data.dataset import Dataset
@@ -43,12 +44,15 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=71)
     parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
     parser.add_argument('--n_workers', type=int, default=4, help="CPUの並列化数（0 で並列化なし）")
+    parser.add_argument('--use_amp', action='store_true')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     if( args.debug ):
         for key, value in vars(args).items():
             print('%s: %s' % (str(key), str(value)))
-        print( "tensoflow version : ", tf.__version__)
+
+        print( "tensoflow version : ", tf.__version__ )
+        print( "device_lib.list_local_devices() : ", device_lib.list_local_devices() )
 
     # 出力フォルダの作成
     if not os.path.isdir(args.results_dir):
@@ -59,6 +63,10 @@ if __name__ == '__main__':
         os.mkdir(args.save_checkpoints_dir)
     if not( os.path.exists(os.path.join(args.save_checkpoints_dir, args.exper_name)) ):
         os.mkdir( os.path.join(args.save_checkpoints_dir, args.exper_name) )
+
+    # AMP 有効化
+    if( args.use_amp ):
+        os.environ['TF_ENABLE_AUTO_MIXED_PRECISION'] = '1'
 
     # 計算グラフ初期化
     tf.reset_default_graph()
@@ -102,6 +110,10 @@ if __name__ == '__main__':
     #================================
     with tf.name_scope('optimizer'):
         optimizer_op = tf.train.AdamOptimizer( learning_rate=args.lr, beta1=args.beta1, beta2=args.beta2 )
+        """
+        if( args.use_amp ):
+            optimizer_op = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer_op)
+        """
         train_op = optimizer_op.minimize(loss_op)
 
     #================================

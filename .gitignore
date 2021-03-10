@@ -3,9 +3,6 @@
 *.json
 *.out
 *.pth
-*.png
-*.jpg
-*.gif
 *.tfevents.*
 *.pyc
 *.tfrec
@@ -13,3 +10,4 @@
 *.tfrecords
 
 _old
+_debug

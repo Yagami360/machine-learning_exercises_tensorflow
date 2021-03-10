@@ -8,6 +8,7 @@ import cv2
 
 # TensorFlow ライブラリ
 import tensorflow as tf
+from tensorflow.python.client import device_lib
 
 # 自作モジュール
 from data.dataset import load_dataset
@@ -41,12 +42,14 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=71)
     parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
     parser.add_argument('--n_workers', type=int, default=4, help="CPUの並列化数（0 で並列化なし）")
+    parser.add_argument('--use_amp', action='store_true')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     if( args.debug ):
         for key, value in vars(args).items():
             print('%s: %s' % (str(key), str(value)))
-        print( "tensoflow version : ", tf.__version__)
+        print( "tensoflow version : ", tf.__version__ )
+        print( "device_lib.list_local_devices() : ", device_lib.list_local_devices() )
 
     # 出力フォルダの作成
     if not os.path.isdir(args.results_dir):
@@ -57,6 +60,12 @@ if __name__ == '__main__':
         os.mkdir(args.save_checkpoints_dir)
     if not( os.path.exists(os.path.join(args.save_checkpoints_dir, args.exper_name)) ):
         os.mkdir( os.path.join(args.save_checkpoints_dir, args.exper_name) )
+    if not os.path.isdir("_debug"):
+        os.mkdir("_debug")
+
+    # AMP 有効化
+    if( args.use_amp ):
+        os.environ['TF_ENABLE_AUTO_MIXED_PRECISION'] = '1'
 
     # Eager execution mode / tensorflow 2.x では明示不要
     #tf.enable_eager_execution()
@@ -107,6 +116,15 @@ if __name__ == '__main__':
     #================================
     loss_fn = tf.keras.losses.MeanSquaredError()
 
+    #================================
+    # AMP 有効化
+    #================================
+    """
+    if( args.use_amp ):
+        policy = keras.mixed_precision.experimental.Policy('mixed_float16', loss_fn)
+        keras.mixed_precision.experimental.set_policy(policy)
+    """
+    
     #================================
     # モデルの学習
     #================================    
