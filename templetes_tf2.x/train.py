@@ -43,6 +43,9 @@ if __name__ == '__main__':
     parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
     parser.add_argument('--n_workers', type=int, default=4, help="CPUの並列化数（0 で並列化なし）")
     parser.add_argument('--use_amp', action='store_true')
+    #parser.add_argument('--use_tfdbg', action='store_true')
+    #parser.add_argument('--detect_inf_or_nan', action='store_true')
+    parser.add_argument('--use_tensorboard_debugger', action='store_true', help="TensorBoard Debugger V2 有効化フラグ")
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     if( args.debug ):
@@ -62,6 +65,14 @@ if __name__ == '__main__':
         os.mkdir( os.path.join(args.save_checkpoints_dir, args.exper_name) )
     if not os.path.isdir("_debug"):
         os.mkdir("_debug")
+
+    # TensorBoard Debugger V2 有効化
+    if( args.use_tensorboard_debugger ):
+        tf.debugging.experimental.enable_dump_debug_info(
+            dump_root = os.path.join(args.tensorboard_dir, args.exper_name + "_debug"),
+            tensor_debug_mode = "FULL_HEALTH",
+            circular_buffer_size = -1
+        )
 
     # AMP 有効化
     if( args.use_amp ):
@@ -125,6 +136,21 @@ if __name__ == '__main__':
         keras.mixed_precision.experimental.set_policy(policy)
     """
     
+    """
+    # tfdbg でのデバッグ処理有効化
+    if( args.use_tfdbg ):
+        from tensorflow.python import debug as tf_debug
+        import tensorflow.python.keras.backend as K
+        sess = K.get_session()
+        #sess.run( tf.global_variables_initializer() )
+        sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+        if( args.detect_inf_or_nan ):
+            from tensorflow.python.debug.lib.debug_data import has_inf_or_nan
+            sess.add_tensor_filter('has_inf_or_nan', has_inf_or_nan)
+
+        K.set_session(sess)
+    """
+
     #================================
     # モデルの学習
     #================================    

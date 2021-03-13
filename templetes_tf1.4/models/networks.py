@@ -28,10 +28,15 @@ class TempleteNetworks():
             session.run(...) はされていない状態。
         """
         # tf.truncated_normal(...) : Tensor を正規分布なランダム値で初期化する
-        init_tsr = tf.truncated_normal( shape = input_shape, stddev = 0.01 )
+        weight_tsr = tf.truncated_normal( shape = input_shape, stddev = 0.01 )
+        """
+        # グラフモード中に tensor 値の中身を確認
+        with tf.Session() as sess:
+            print( "weight_tsr : ", weight_tsr.eval() )
+        """
 
         # 重みの Variable
-        weight_var = tf.Variable( init_tsr )
+        weight_var = tf.Variable( weight_tsr )
         return weight_var
 
     def init_bias_variable( self, input_shape ):
@@ -46,10 +51,16 @@ class TempleteNetworks():
             ゼロ初期化された重みの Variable 
             session.run(...) はされていない状態。
         """
-        init_tsr = tf.random_normal( shape = input_shape )
+        bias_tsr = tf.random_normal( shape = input_shape )
+
+        """
+        # グラフモード中に tensor 値の中身を確認
+        with tf.Session() as sess:
+            print( "bias_tsr : ", bias_tsr.eval() )
+        """
 
         # バイアス項の Variable
-        bias_var = tf.Variable( init_tsr )
+        bias_var = tf.Variable( bias_tsr )
         return bias_var
 
     def __call__( self, image_s_holder ):
@@ -69,5 +80,10 @@ class TempleteNetworks():
                     )
 
             output_op = conv_op1
- 
+
+            # tf.Print() を用いた tensor 値の確認
+            #print_op = tf.Print(conv_op1, [conv_op1] )
+            #output_op = print_op
+
+
         return output_op

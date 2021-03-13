@@ -45,6 +45,8 @@ if __name__ == '__main__':
     parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
     parser.add_argument('--n_workers', type=int, default=4, help="CPUの並列化数（0 で並列化なし）")
     parser.add_argument('--use_amp', action='store_true')
+    parser.add_argument('--use_tfdbg', choices=['not_use', 'cli', 'gui'], default="not_use", help="tfdbg使用フラグ")
+    parser.add_argument('--detect_inf_or_nan', action='store_true')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     if( args.debug ):
@@ -52,6 +54,8 @@ if __name__ == '__main__':
             print('%s: %s' % (str(key), str(value)))
 
         print( "tensoflow version : ", tf.__version__ )
+        from tensorboard import version
+        print( "tensorboard version : ", print(version.VERSION) )
         print( "device_lib.list_local_devices() : ", device_lib.list_local_devices() )
 
     # 出力フォルダの作成
@@ -119,23 +123,17 @@ if __name__ == '__main__':
     #================================
     # tensorboard 出力
     #================================
-    if( int(tf.__version__.split(".")[0]) >= 2 ):
-        board_train = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name) )
-        board_valid = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
-        board_train.set_as_default()
-        #board_valid.set_as_default()
-    else:
-        board_train = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name), sess.graph )
-        board_valid = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
+    board_train = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name), sess.graph )
+    board_valid = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
 
-        board_loss_op = tf.summary.scalar("G/loss_G", loss_op)
-        board_train_image_s_op = tf.summary.image( 'train/image_s', image_s_holder, max_outputs = args.batch_size )
-        board_train_image_t_op = tf.summary.image( 'train/image_t', image_t_holder, max_outputs = args.batch_size )
-        board_train_output_op = tf.summary.image( 'train/output', image_t_holder, max_outputs = args.batch_size )
-        board_valid_image_s_op = tf.summary.image( 'valid/image_s', image_s_holder )
-        board_valid_image_t_op = tf.summary.image( 'valid/image_t', image_t_holder )
-        board_valid_output_op = tf.summary.image( 'valid/output', image_t_holder )
-        board_merge_op = tf.summary.merge_all()
+    board_loss_op = tf.summary.scalar("G/loss_G", loss_op)
+    board_train_image_s_op = tf.summary.image( 'train/image_s', image_s_holder, max_outputs = args.batch_size )
+    board_train_image_t_op = tf.summary.image( 'train/image_t', image_t_holder, max_outputs = args.batch_size )
+    board_train_output_op = tf.summary.image( 'train/output', image_t_holder, max_outputs = args.batch_size )
+    board_valid_image_s_op = tf.summary.image( 'valid/image_s', image_s_holder )
+    board_valid_image_t_op = tf.summary.image( 'valid/image_t', image_t_holder )
+    board_valid_output_op = tf.summary.image( 'valid/output', image_t_holder )
+    board_merge_op = tf.summary.merge_all()
 
     #================================
     # モデルの学習
@@ -147,6 +145,20 @@ if __name__ == '__main__':
 
     # 変数初期化
     sess.run( tf.global_variables_initializer() )
+
+    # tfdbg でのデバッグ処理有効化
+    if( args.use_tfdbg == "cli" ):
+        from tensorflow.python import debug as tf_debug
+        sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+        if( args.detect_inf_or_nan ):
+            from tensorflow.python.debug.lib.debug_data import has_inf_or_nan
+            sess.add_tensor_filter('has_inf_or_nan', has_inf_or_nan)
+    elif( args.use_tfdbg == "gui" ):
+        from tensorflow.python import debug as tf_debug
+        tf_debug.TensorBoardDebugWrapperSession(sess, "localhost:6007")
+        if( args.detect_inf_or_nan ):
+            from tensorflow.python.debug.lib.debug_data import has_inf_or_nan
+            sess.add_tensor_filter('has_inf_or_nan', has_inf_or_nan)
 
     for epoch in tqdm( range(args.n_epoches), desc = "epoches" ):
         # データセット初期化
