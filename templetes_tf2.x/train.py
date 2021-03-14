@@ -127,19 +127,18 @@ if __name__ == '__main__':
     optimizer_G = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 )
 
     #================================
+    # AMP 有効化
+    #================================
+    if( args.use_amp ):
+        #policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
+        #tf.keras.mixed_precision.experimental.set_policy(policy)
+        optimizer_G = tf.keras.mixed_precision.experimental.LossScaleOptimizer(optimizer_G, loss_scale='dynamic')
+
+    #================================
     # loss 関数の設定
     #================================
     loss_fn = tf.keras.losses.MeanSquaredError()
-
-    #================================
-    # AMP 有効化
-    #================================
-    """
-    if( args.use_amp ):
-        policy = keras.mixed_precision.experimental.Policy('mixed_float16', loss_fn)
-        keras.mixed_precision.experimental.set_policy(policy)
-    """
-    
+        
     #================================
     # tfdbg でのデバッグ処理有効化
     #================================

@@ -158,11 +158,9 @@ if __name__ == '__main__':
     #================================
     # AMP 有効化
     #================================
-    """
     if( args.use_amp ):
-        policy = keras.mixed_precision.experimental.Policy('mixed_float16', loss_fn)
-        keras.mixed_precision.experimental.set_policy(policy)
-    """
+        policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
+        tf.keras.mixed_precision.experimental.set_policy(policy)
     
     #================================
     # tfdbg でのデバッグ処理有効化
