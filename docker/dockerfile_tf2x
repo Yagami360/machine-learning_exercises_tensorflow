@@ -1,7 +1,8 @@
 #-----------------------------
 # Docker イメージのベースイメージ
 #-----------------------------
-FROM tensorflow/tensorflow:2.2.2-gpu-py3
+#FROM tensorflow/tensorflow:2.2.2-gpu-py3
+FROM tensorflow/tensorflow:2.4.1-gpu
 
 #-----------------------------
 # 基本ライブラリのインストール

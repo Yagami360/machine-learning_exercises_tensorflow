@@ -17,7 +17,7 @@ TensorFlow を利用した機械学習モデルの実装コード集
 - tensorflow 2.x
     - [templetes_tf2.x](https://github.com/Yagami360/machine-learning_exercises_tensorflow/tree/master/templetes_tf2.x)
 - tensorflow 2.x with keras
-    - xxx
+    - [templetes_tf2.x_with_keras](https://github.com/Yagami360/machine-learning_exercises_tensorflow/tree/master/templetes_tf2.x_with_keras)
 
 ## tensorflow のバージョン毎の違い
 

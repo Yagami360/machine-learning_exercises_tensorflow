@@ -19,8 +19,9 @@ if [ "$(docker ps -aqf "name=${CONTAINER_NAME}")" ]; then
 fi
 
 docker run -d -it -v ${HOME}/machine-learning_exercises_tensorflow:/mnt/machine-learning_exercises_tensorflow --name ${CONTAINER_NAME} --runtime=nvidia ${IMAGE_NAME} /bin/bash
-docker exec -it ${CONTAINER_NAME} /bin/sh -c "cd /mnt/machine-learning_exercises_tensorflow/templetes_tf2.x && \
+docker exec -it ${CONTAINER_NAME} /bin/sh -c "cd /mnt/machine-learning_exercises_tensorflow/templetes_tf2.x_with_keras && \
     python train.py \
         --exper_name ${EXPER_NAME} \
+        --use_datagen \
         --use_tensorboard_debugger \
         --debug"

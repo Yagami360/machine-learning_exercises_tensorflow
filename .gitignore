@@ -8,6 +8,7 @@
 *.tfrec
 *.tfrecord
 *.tfrecords
+*.hdf5
 
 _old
 _debug

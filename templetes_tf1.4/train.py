@@ -55,7 +55,7 @@ if __name__ == '__main__':
 
         print( "tensoflow version : ", tf.__version__ )
         from tensorboard import version
-        print( "tensorboard version : ", print(version.VERSION) )
+        print( "tensorboard version : ", version.VERSION )
         print( "device_lib.list_local_devices() : ", device_lib.list_local_devices() )
 
     # 出力フォルダの作成
@@ -154,6 +154,7 @@ if __name__ == '__main__':
             from tensorflow.python.debug.lib.debug_data import has_inf_or_nan
             sess.add_tensor_filter('has_inf_or_nan', has_inf_or_nan)
     elif( args.use_tfdbg == "gui" ):
+        # [ToDo] AttributeError: module 'tensorflow.python.debug' has no attribute 'TensorBoardDebugWrapperSession' のエラー解消
         from tensorflow.python import debug as tf_debug
         tf_debug.TensorBoardDebugWrapperSession(sess, "localhost:6007")
         if( args.detect_inf_or_nan ):

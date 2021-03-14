@@ -10,8 +10,12 @@ import cv2
 import tensorflow as tf
 from tensorflow.python.client import device_lib
 
+# Keras
+from tensorflow import keras
+import tensorflow.keras.backend as K
+
 # 自作モジュール
-from data.dataset import load_dataset
+from data.dataset import load_dataset, TempleteDataGen
 from models.networks import TempleteNetworks
 from utils.utils import set_random_seed, numerical_sort
 from utils.utils import sava_image_tsr
@@ -38,7 +42,7 @@ if __name__ == '__main__':
     parser.add_argument("--val_rate", type=float, default=0.01)
     parser.add_argument('--n_display_valid', type=int, default=8, help="valid データの tensorboard への表示数")
     parser.add_argument('--data_augument', action='store_true')
-    parser.add_argument('--use_tfrecord', action='store_true')
+    parser.add_argument('--use_datagen', action='store_true', help="データジェネレータを使用するか否か")
     parser.add_argument("--seed", type=int, default=71)
     parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
     parser.add_argument('--n_workers', type=int, default=4, help="CPUの並列化数（0 で並列化なし）")
@@ -96,40 +100,60 @@ if __name__ == '__main__':
     # seed 値の固定
     set_random_seed(args.seed)
 
-    # tensorboard 出力
-    board_train = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name) )
-    board_valid = tf.summary.create_file_writer( logdir = os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
-    board_train.set_as_default()
-    #board_valid.set_as_default()
-
     #================================
     # データセットの読み込み
     #================================    
     # 学習用データセットとテスト用データセットの設定
-    ds_train, ds_valid, n_trains, n_valids = load_dataset( args.dataset_dir, image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = args.batch_size, use_tfrecord = args.use_tfrecord, seed = args.seed )
-    if( args.debug ):
-        print( "n_trains : ", n_trains )
-        print( "n_valids : ", n_valids )
-        print( "ds_train : ", ds_train )
-        print( "ds_valid : ", ds_valid )
+    if( args.use_datagen ):
+        datagen_train = TempleteDataGen( 
+            dataset_dir = args.dataset_dir, 
+            datamode =  "train",
+            image_height = args.image_height, image_width = args.image_width, batch_size = args.batch_size,
+        )
+    else:
+        image_s_trains, image_t_trains, image_s_valids, image_t_valids = load_dataset( args.dataset_dir, image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = args.batch_size, seed = args.seed )
+        if( args.debug ):
+            print( "[image_s_trains] shape={}, dtype={}, min={}, max={}".format(image_s_trains.shape, image_s_trains.dtype, np.min(image_s_trains), np.max(image_s_trains)) )
+            print( "[image_t_trains] shape={}, dtype={}, min={}, max={}".format(image_t_trains.shape, image_t_trains.dtype, np.min(image_t_trains), np.max(image_t_trains)) )
+            print( "[image_s_valids] shape={}, dtype={}, min={}, max={}".format(image_s_valids.shape, image_s_valids.dtype, np.min(image_s_valids), np.max(image_s_valids)) )
+            print( "[image_t_valids] shape={}, dtype={}, min={}, max={}".format(image_t_valids.shape, image_t_valids.dtype, np.min(image_t_valids), np.max(image_t_valids)) )
 
     #================================
     # モデルの構造を定義する。
     #================================
     model_G = TempleteNetworks(out_dim=3)
+    
+    #================================
+    # optimizer, loss を設定
+    #================================
+    model_G.compile(
+        loss = tf.keras.losses.MeanSquaredError(),
+        optimizer = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 ),
+        metrics = ['mae']
+    )
+
     if( args.debug ):
         model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )    # 動的作成されるネットワークなので、一度ネットワークに入力データを供給しないと summary() を出力できない
         model_G.summary()
-    
-    #================================
-    # optimizer の設定
-    #================================
-    optimizer_G = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 )
 
     #================================
-    # loss 関数の設定
+    # call backs の設定
     #================================
-    loss_fn = tf.keras.losses.MeanSquaredError()
+    # 各エポック終了毎のモデルのチェックポイント保存用 call back
+    callback_checkpoint = tf.keras.callbacks.ModelCheckpoint( 
+        filepath = os.path.join(args.save_checkpoints_dir, args.exper_name, "step_{epoch:08d}.hdf5"), 
+        monitor = 'loss', 
+        verbose = 2, 
+        save_weights_only = True,       # 
+        save_best_only = False,         # 精度がよくなった時だけ保存するかどうか指定。False の場合は毎 epoch 毎保存．
+        mode = 'auto',                  # 
+        period = args.n_save_epoches    # 何エポックごとに保存するか
+    )
+
+    # tensorboard の出力用の call back
+    callback_board_train = tf.keras.callbacks.TensorBoard( log_dir = os.path.join(args.tensorboard_dir, args.exper_name), write_graph = False )
+
+    callbacks = [ callback_board_train, callback_checkpoint ]
 
     #================================
     # AMP 有効化
@@ -145,8 +169,8 @@ if __name__ == '__main__':
     #================================
     """
     if( args.use_tfdbg == "cli" ):
+        # [ToDo] AttributeError: module 'tensorflow.keras.backend' has no attribute 'get_session' のエラー解消
         from tensorflow.python import debug as tf_debug
-        #import tensorflow.python.keras.backend as K
         import tensorflow.keras.backend as K
         sess = K.get_session()
         #sess.run( tf.global_variables_initializer() )
@@ -158,7 +182,6 @@ if __name__ == '__main__':
         # [ToDo] AttributeError: module 'tensorflow.python.debug' has no attribute 'TensorBoardDebugWrapperSession' のエラー解消
         from tensorflow.python import debug as tf_debug
         from tensorflow.python import debug as tf_debug
-        #import tensorflow.python.keras.backend as K
         import tensorflow.keras.backend as K
         sess = K.get_session()
         tf_debug.TensorBoardDebugWrapperSession(sess, "localhost:6007")
@@ -170,111 +193,25 @@ if __name__ == '__main__':
     #================================
     # モデルの学習
     #================================    
-    print("Starting Training Loop...")
-    n_prints = 1
-    step = 0
-    iters = 0
-
-    for epoch in tqdm( range(args.n_epoches), desc = "epoches" ):
-        # ミニバッチデータの取り出し
-        for image_s, image_t in ds_train:
-            if( args.debug and n_prints > 0 ):
-                print("[image_s] shape={}, dtype={}, min={}, max={}".format(image_s.shape, image_s.dtype, np.min(image_s.numpy()), np.max(image_s.numpy())))
-                print("[image_t] shape={}, dtype={}, min={}, max={}".format(image_t.shape, image_t.dtype, np.min(image_t.numpy()), np.max(image_t.numpy())))
-                sava_image_tsr( image_s[0], "_debug/image_s.png" )
-                sava_image_tsr( image_t[0], "_debug/image_t.png" )
-
-            #====================================================
-            # 学習処理
-            #====================================================
-            @tf.function    # 高速化のためのデコレーター
-            def train_on_batch(input, target):
-                # スコープ以下を自動微分計算
-                with tf.GradientTape() as tape:
-                    # モデルの forward 処理
-                    output = model_G(input, training=True)
-
-                    # 損失関数の計算
-                    loss_G = loss_fn(target, output)
-
-                # モデルの更新処理
-                grads = tape.gradient(loss_G, model_G.trainable_weights)
-                optimizer_G.apply_gradients(zip(grads, model_G.trainable_weights))
-                #train_acc_metric.update_state(target, logits)
-                return output, loss_G
-
-            output, loss_G = train_on_batch( image_s, image_t )
-
-            #====================================================
-            # 学習過程の表示
-            #====================================================
-            if( step == 0 or ( step % args.n_diaplay_step == 0 ) ):
-                # lr
-                pass
-
-                # loss
-                print( "epoch={}, step={}, loss_G={:.5f}".format(epoch, step, loss_G) )
-                with board_train.as_default():
-                    tf.summary.scalar("G/loss_G", loss_G, step=step+1, description="生成器の全loss")
-
-                # visual images
-                with board_train.as_default():
-                    #tf.summary.image( "train/image_s", image_s, step=step+1 )
-                    #tf.summary.image( "train/image_t", image_t, step=step+1 )
-                    visuals = [
-                        [ image_s, image_t, output ],
-                    ]
-                    board_add_images(board_train, 'train', visuals, step+1 )
-
-            #====================================================
-            # valid データでの処理
-            #====================================================
-            if( step != 0 and ( step % args.n_display_valid_step == 0 ) ):
-                loss_G_total = 0
-                n_valid_loop = 0                
-                for i, (image_s, image_t) in enumerate(ds_valid):
-                    #---------------------------------
-                    # 推論処理
-                    #---------------------------------
-                    @tf.function
-                    def eval_on_batch(input, target):
-                        # スコープ以下を自動微分計算
-                        with tf.GradientTape() as tape:
-                            # モデルの forward 処理
-                            output = model_G(input, training=False)
-
-                            # 損失関数の計算
-                            loss_G = loss_fn(target, output)
-
-                        return output, loss_G
-
-                    output, loss_G = eval_on_batch( image_s, image_t )
-                    loss_G_total += loss_G
-
-                    #---------------------------------
-                    # 生成画像表示
-                    #---------------------------------
-                    if( i <= args.n_display_valid ):
-                        with board_train.as_default():
-                            visuals = [
-                                [ image_s, image_t, output ],
-                            ]
-                            board_add_images(board_valid, 'valid/{}'.format(i), visuals, step+1 )                            
-
-                    n_valid_loop += 1
-
-                # loss 値表示
-                with board_train.as_default():
-                    tf.summary.scalar("G/loss_G", loss_G_total/n_valid_loop, step=step+1, description="生成器の全loss")
-
-            step += 1
-            iters += args.batch_size
-            n_prints -= 1
-
-        #====================================================
-        # モデルの保存
-        #====================================================
-        if( epoch % args.n_save_epoches == 0 ):
-            pass
-
-    print("Finished Training Loop.")
+    if( args.use_datagen ):
+        history = model_G.fit_generator( 
+            generator = datagen_train, 
+            epochs = args.n_epoches, 
+            steps_per_epoch = len(datagen_train),
+            verbose = 1,
+            workers = args.n_workers,
+            shuffle = True,
+            use_multiprocessing = True,
+            callbacks = callbacks
+        )
+    else:
+        history = model_G.fit( 
+            x = image_s_trains, y = image_t_trains, 
+            epochs = args.n_epoches, 
+            steps_per_epoch = 1,
+            verbose = 1,
+            workers = args.n_workers,
+            shuffle = True,
+            use_multiprocessing = True,
+            callbacks = callbacks
+        )
