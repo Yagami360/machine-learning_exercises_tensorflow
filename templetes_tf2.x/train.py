@@ -22,8 +22,8 @@ if __name__ == '__main__':
     parser.add_argument("--exper_name", default="debug", help="実験名")
     parser.add_argument("--dataset_dir", type=str, default="datasets/templete_dataset")
     parser.add_argument("--results_dir", type=str, default="results")
-    parser.add_argument('--save_checkpoints_dir', type=str, default="checkpoints", help="モデルの保存ディレクトリ")
-    parser.add_argument('--load_checkpoints_path', type=str, default="", help="モデルの読み込みファイルのパス")
+    parser.add_argument('--save_checkpoints_dir', type=str, default="checkpoints/", help="モデルの保存ディレクトリ")
+    parser.add_argument('--load_checkpoints_dir', type=str, default="checkpoints/", help="モデルの読み込みファイルのディレクトリ")
     parser.add_argument('--tensorboard_dir', type=str, default="tensorboard", help="TensorBoard のディレクトリ")
     parser.add_argument("--n_epoches", type=int, default=100, help="エポック数")    
     parser.add_argument('--batch_size', type=int, default=4, help="バッチサイズ")
@@ -120,7 +120,22 @@ if __name__ == '__main__':
     if( args.debug ):
         model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )    # 動的作成されるネットワークなので、一度ネットワークに入力データを供給しないと summary() を出力できない
         model_G.summary()
-    
+
+    #================================
+    # モデルの読み込み
+    #================================
+    if( args.load_checkpoints_dir ):
+        ckpt_state = tf.train.get_checkpoint_state(args.load_checkpoints_dir)
+        model_G.load_weights(ckpt_state.model_checkpoint_path)
+        print( "load checkpoints in `{}`.".format(ckpt_state.model_checkpoint_path) )
+        init_epoch = int(ckpt_state.model_checkpoint_path.split("-")[-1])
+        step = init_epoch               # @
+        iters = step * args.batch_size  # @
+    else:
+        init_epoch = 0
+        step = 0
+        iters = 0
+
     #================================
     # optimizer の設定
     #================================
@@ -171,10 +186,7 @@ if __name__ == '__main__':
     #================================    
     print("Starting Training Loop...")
     n_prints = 1
-    step = 0
-    iters = 0
-
-    for epoch in tqdm( range(args.n_epoches), desc = "epoches" ):
+    for epoch in tqdm( range(args.n_epoches+init_epoch), desc = "epoches", initial=init_epoch ):
         # ミニバッチデータの取り出し
         for image_s, image_t in ds_train:
             if( args.debug and n_prints > 0 ):

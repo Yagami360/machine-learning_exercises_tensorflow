@@ -26,8 +26,8 @@ if __name__ == '__main__':
     parser.add_argument("--exper_name", default="debug", help="実験名")
     parser.add_argument("--dataset_dir", type=str, default="datasets/templete_dataset")
     parser.add_argument("--results_dir", type=str, default="results")
-    parser.add_argument('--save_checkpoints_dir', type=str, default="checkpoints", help="モデルの保存ディレクトリ")
-    parser.add_argument('--load_checkpoints_path', type=str, default="", help="モデルの読み込みファイルのパス")
+    parser.add_argument('--save_checkpoints_dir', type=str, default="checkpoints/", help="モデルの保存ディレクトリ")
+    parser.add_argument('--load_checkpoints_path', type=str, default="", help="モデルの読み込みファイルのパス（*.hdf5）")
     parser.add_argument('--tensorboard_dir', type=str, default="tensorboard", help="TensorBoard のディレクトリ")
     parser.add_argument("--n_epoches", type=int, default=100, help="エポック数")    
     parser.add_argument('--batch_size', type=int, default=4, help="バッチサイズ")
@@ -137,11 +137,24 @@ if __name__ == '__main__':
         model_G.summary()
 
     #================================
+    # モデルの読み込み
+    #================================
+    if( args.load_checkpoints_path ):
+        # モデルを定義したあと読み込む場合は load_weights() を使用
+        # モデルを定義せずに読み込む場合は keras.models.load_model() を使用
+        #model_G = keras.models.load_model(args.load_checkpoints_path)
+        model_G.load_weights(args.load_checkpoints_path)
+        print( "load checkpoints in `{}`.".format(args.load_checkpoints_path) )
+        init_epoch = 0
+    else:
+        init_epoch = 0
+
+    #================================
     # call backs の設定
     #================================
     # 各エポック終了毎のモデルのチェックポイント保存用 call back
     callback_checkpoint = tf.keras.callbacks.ModelCheckpoint( 
-        filepath = os.path.join(args.save_checkpoints_dir, args.exper_name, "step_{epoch:08d}.hdf5"), 
+        filepath = os.path.join(args.save_checkpoints_dir, args.exper_name, "step_{epoch:05d}.hdf5"), 
         monitor = 'loss', 
         verbose = 2, 
         save_weights_only = True,       # 
