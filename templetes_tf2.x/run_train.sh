@@ -9,6 +9,7 @@ mkdir -p ${TENSORBOARD_DIR}
 sudo rm -rf ${TENSORBOARD_DIR}/${EXPER_NAME}
 sudo rm -rf ${TENSORBOARD_DIR}/${EXPER_NAME}_valid
 sudo rm -rf ${TENSORBOARD_DIR}/${EXPER_NAME}_debug
+#sudo rm -rf checkpoints
 
 if [ ! "$(docker image ls -q ${IMAGE_NAME})" ]; then
     docker build ../docker -t ${IMAGE_NAME} -f ../docker/dockerfile_tf2x

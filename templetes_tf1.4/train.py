@@ -24,8 +24,8 @@ if __name__ == '__main__':
     parser.add_argument("--exper_name", default="debug", help="実験名")
     parser.add_argument("--dataset_dir", type=str, default="datasets/templete_dataset")
     parser.add_argument("--results_dir", type=str, default="results")
-    parser.add_argument('--save_checkpoints_dir', type=str, default="checkpoints", help="モデルの保存ディレクトリ")
-    parser.add_argument('--load_checkpoints_path', type=str, default="", help="モデルの読み込みファイルのパス")
+    parser.add_argument('--save_checkpoints_dir', type=str, default="checkpoints/", help="モデルの保存ディレクトリ")
+    parser.add_argument('--load_checkpoints_dir', type=str, default="checkpoints/", help="モデルの読み込みファイルのパス")
     parser.add_argument('--tensorboard_dir', type=str, default="tensorboard", help="TensorBoard のディレクトリ")
     parser.add_argument("--n_epoches", type=int, default=100, help="エポック数")    
     parser.add_argument('--batch_size', type=int, default=4, help="バッチサイズ")
@@ -37,6 +37,7 @@ if __name__ == '__main__':
     parser.add_argument("--n_diaplay_step", type=int, default=100,)
     parser.add_argument('--n_display_valid_step', type=int, default=500, help="valid データの tensorboard への表示間隔")
     parser.add_argument("--n_save_epoches", type=int, default=10,)
+    parser.add_argument("--n_save_max", type=int, default=10,)
     parser.add_argument("--val_rate", type=float, default=0.01)
     parser.add_argument('--n_display_valid', type=int, default=8, help="valid データの tensorboard への表示数")
     parser.add_argument('--data_augument', action='store_true')
@@ -121,6 +122,23 @@ if __name__ == '__main__':
         train_op = optimizer_op.minimize(loss_op)
 
     #================================
+    # 学習済みモデルの読み込み
+    #================================
+    # モデルの保存用 Saver
+    saver = tf.train.Saver(max_to_keep=args.n_save_max)
+    if( os.path.exists(args.load_checkpoints_dir) ):
+        ckpt_state = tf.train.get_checkpoint_state(args.load_checkpoints_dir)
+        saver.restore(sess, ckpt_state.model_checkpoint_path)
+        print( "load checkpoints in `{}`.".format(ckpt_state.model_checkpoint_path) )
+        init_epoch = int(ckpt_state.model_checkpoint_path.split("-")[-1])
+        step = init_epoch               # @
+        iters = step * args.batch_size  # @
+    else:
+        init_epoch = 0
+        step = 0
+        iters = 0
+
+    #================================
     # tensorboard 出力
     #================================
     board_train = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name), sess.graph )
@@ -140,8 +158,6 @@ if __name__ == '__main__':
     #================================    
     print("Starting Training Loop...")
     n_prints = 1
-    step = 0
-    iters = 0
 
     # 変数初期化
     sess.run( tf.global_variables_initializer() )
@@ -161,7 +177,7 @@ if __name__ == '__main__':
             from tensorflow.python.debug.lib.debug_data import has_inf_or_nan
             sess.add_tensor_filter('has_inf_or_nan', has_inf_or_nan)
 
-    for epoch in tqdm( range(args.n_epoches), desc = "epoches" ):
+    for epoch in tqdm( range(args.n_epoches+init_epoch), desc = "epoches", initial=init_epoch ):
         # データセット初期化
         sess.run(ds_train.init_iter_op)
         while True:
@@ -255,7 +271,10 @@ if __name__ == '__main__':
         # モデルの保存
         #====================================================
         if( epoch % args.n_save_epoches == 0 ):
-            pass
+            # *.data-00000-of-00001 : 変数名をテンソル値としてマッピングした独自のフォーマット
+            # *.index : 複数のstepでデータを保存した際に、同名の「.data-00000-of-00001」ファイルが、どのstepのデータであるのかを一意に定める。
+            # *.meta : モデルのネットワーク構造と重みを格納
+            saver.save(sess, os.path.join(args.save_checkpoints_dir, args.exper_name, "model_G"), global_step=epoch )
 
     print("Finished Training Loop.")
 

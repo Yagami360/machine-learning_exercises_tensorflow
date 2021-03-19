@@ -274,6 +274,6 @@ if __name__ == '__main__':
         # モデルの保存
         #====================================================
         if( epoch % args.n_save_epoches == 0 ):
-            pass
+            model_G.save_weights( os.path.join(args.save_checkpoints_dir, args.exper_name, "model_G-{}".format(epoch)) )
 
     print("Finished Training Loop.")
