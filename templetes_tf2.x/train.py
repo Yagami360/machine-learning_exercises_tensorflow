@@ -23,7 +23,7 @@ if __name__ == '__main__':
     parser.add_argument("--dataset_dir", type=str, default="datasets/templete_dataset")
     parser.add_argument("--results_dir", type=str, default="results")
     parser.add_argument('--save_checkpoints_dir', type=str, default="checkpoints/", help="モデルの保存ディレクトリ")
-    parser.add_argument('--load_checkpoints_dir', type=str, default="checkpoints/", help="モデルの読み込みファイルのディレクトリ")
+    parser.add_argument('--load_checkpoints_dir', type=str, default="", help="モデルの読み込みファイルのディレクトリ")
     parser.add_argument('--tensorboard_dir', type=str, default="tensorboard", help="TensorBoard のディレクトリ")
     parser.add_argument("--n_epoches", type=int, default=100, help="エポック数")    
     parser.add_argument('--batch_size', type=int, default=4, help="バッチサイズ")

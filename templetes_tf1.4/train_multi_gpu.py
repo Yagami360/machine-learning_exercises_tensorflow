@@ -14,7 +14,7 @@ from tensorflow.python.client import device_lib
 
 # 自作モジュール
 from data.dataset import Dataset
-from models.networks import TempleteNetworks
+from models.networks import TempleteNetworks, TempleteNetworksMultiGPU
 from utils.utils import set_random_seed, numerical_sort
 from utils.utils import sava_image_tsr
 #from utils.utils import board_add_image, board_add_images
@@ -43,15 +43,21 @@ if __name__ == '__main__':
     parser.add_argument('--data_augument', action='store_true')
     parser.add_argument('--use_tfrecord', action='store_true')
     parser.add_argument("--seed", type=int, default=71)
-    parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
     parser.add_argument('--n_workers', type=int, default=4, help="CPUの並列化数（0 で並列化なし）")
-    parser.add_argument('--n_gpus', type=int, default=1, help="GPUの並列化数（1 で並列化なし）")
+    parser.add_argument('--gpu_ids', type=str, default="0", help="使用GPU （例 : 0,1,2,3）")
     parser.add_argument('--use_amp', action='store_true')
     parser.add_argument('--use_tfdbg', choices=['not_use', 'cli', 'gui'], default="not_use", help="tfdbg使用フラグ")
     parser.add_argument('--detect_inf_or_nan', action='store_true')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     if( args.debug ):
+        str_gpu_ids = args.gpu_ids.split(',')
+        args.gpu_ids = []
+        for str_gpu_id in str_gpu_ids:
+            id = int(str_gpu_id)
+            if id >= 0:
+                args.gpu_ids.append(id)
+
         for key, value in vars(args).items():
             print('%s: %s' % (str(key), str(value)))
 
@@ -70,11 +76,6 @@ if __name__ == '__main__':
     if not( os.path.exists(os.path.join(args.save_checkpoints_dir, args.exper_name)) ):
         os.mkdir( os.path.join(args.save_checkpoints_dir, args.exper_name) )
 
-    # GPU数
-    local_device_protos = device_lib.list_local_devices()
-    n_gpus = [x.name for x in local_device_protos if x.device_type == 'GPU']
-    print( "n_gpus : ", n_gpus )
-
     # AMP 有効化
     if( args.use_amp ):
         os.environ['TF_ENABLE_AUTO_MIXED_PRECISION'] = '1'
@@ -84,9 +85,6 @@ if __name__ == '__main__':
 
     # Session 開始
     sess = tf.Session()
-
-    # 実行 Device の設定
-    pass
 
     # seed 値の固定
     set_random_seed(args.seed)
@@ -107,25 +105,35 @@ if __name__ == '__main__':
     #================================
     # モデルの構造を定義する。
     #================================
-    model_G = TempleteNetworks(out_dim=3)
-    output_op = model_G(image_s_holder)
+    model_G = TempleteNetworksMultiGPU(out_dim=3, gpu_ids=args.gpu_ids)
+    output_op_gpus = model_G(image_s_holder)
 
     #================================
     # loss 関数の設定
     #================================
-    with tf.name_scope('loss'):
-        loss_op = tf.reduce_mean( tf.abs(image_t_holder - output_op) )
+    loss_op_gpus = []
+    for gpu_id in args.gpu_ids:
+        with tf.device('/gpu:%d' % gpu_id):
+            with tf.name_scope('loss' + '_gpu_{}'.format(gpu_id)):
+                loss_op = tf.reduce_mean( tf.abs(image_t_holder - output_op_gpus[gpu_id]) )
+                loss_op_gpus.append(loss_op)
 
     #================================
     # optimizer の設定
     #================================
-    with tf.name_scope('optimizer'):
-        optimizer_op = tf.train.AdamOptimizer( learning_rate=args.lr, beta1=args.beta1, beta2=args.beta2 )
-        """
-        if( args.use_amp ):
-            optimizer_op = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer_op)
-        """
-        train_op = optimizer_op.minimize(loss_op)
+    optimizer_op_gpus = []
+    train_op_gpus = []
+    for gpu_id in args.gpu_ids:
+        with tf.device('/gpu:%d' % gpu_id):
+            with tf.name_scope('optimizer' + '_gpu_{}'.format(gpu_id)):
+                optimizer_op = tf.train.AdamOptimizer( learning_rate=args.lr, beta1=args.beta1, beta2=args.beta2 )
+                """
+                if( args.use_amp ):
+                    optimizer_op = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer_op)
+                """
+                train_op = optimizer_op.minimize(loss_op)
+                optimizer_op_gpus.append(optimizer_op)
+                train_op_gpus.append(train_op)
 
     #================================
     # 学習済みモデルの読み込み
@@ -150,7 +158,7 @@ if __name__ == '__main__':
     board_train = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name), sess.graph )
     board_valid = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
 
-    board_loss_op = tf.summary.scalar("G/loss_G", loss_op)
+    board_loss_op = tf.summary.scalar("G/loss_G", loss_op_gpus[0])
     board_train_image_s_op = tf.summary.image( 'train/image_s', image_s_holder, max_outputs = args.batch_size )
     board_train_image_t_op = tf.summary.image( 'train/image_t', image_t_holder, max_outputs = args.batch_size )
     board_train_output_op = tf.summary.image( 'train/output', image_t_holder, max_outputs = args.batch_size )
@@ -202,7 +210,7 @@ if __name__ == '__main__':
                 #====================================================
                 # 学習処理
                 #====================================================
-                _, output, loss_G = sess.run([train_op, output_op, loss_op], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                _, output, loss_G = sess.run([train_op_gpus[0], output_op_gpus[0], loss_op_gpus[0]], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
                 if( args.debug and n_prints > 0 ):
                     print("[output] shape={}, dtype={}, min={}, max={}".format(output.shape, output.dtype, np.min(output), np.max(output)))
 
@@ -246,7 +254,7 @@ if __name__ == '__main__':
                         image_s, image_t = sess.run(ds_valid.batch_op)
 
                         # 出力画像と loss 値取得
-                        output, loss_G = sess.run([output_op, loss_op], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                        output, loss_G = sess.run([output_op_gpus[0], loss_op_gpus[0]], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
                         loss_G_total += loss_G
 
                         # 画像表示

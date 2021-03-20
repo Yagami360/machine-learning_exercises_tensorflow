@@ -1,5 +1,6 @@
 #!bin/bash
 set -eu
+GPU_IDS=0
 IMAGE_NAME=tensorflow14-image
 CONTAINER_NAME=tensorflow14-container
 EXPER_NAME=debug
@@ -21,6 +22,7 @@ fi
 
 docker run -d -it -v ${HOME}/machine-learning_exercises_tensorflow:/mnt/machine-learning_exercises_tensorflow --name ${CONTAINER_NAME} --runtime=nvidia ${IMAGE_NAME} /bin/bash
 docker exec -it ${CONTAINER_NAME} /bin/sh -c "cd /mnt/machine-learning_exercises_tensorflow/templetes_tf1.4 && \
-    python train.py \
+    python train_multi_gpu.py \
         --exper_name ${EXPER_NAME} \
+        --gpu_ids ${GPU_IDS} \
         --debug"
