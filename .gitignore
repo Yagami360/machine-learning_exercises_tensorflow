@@ -11,7 +11,7 @@
 *.hdf5
 *.index
 *.meta
-*.data-00000-of-00001
+*.data-*-of-*
 checkpoint
 
 _old

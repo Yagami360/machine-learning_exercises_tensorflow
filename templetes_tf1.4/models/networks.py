@@ -137,7 +137,7 @@ class TempleteNetworksMultiGPU():
             session.run(...) はされていない状態。
         """
         bias_tsr = tf.random_normal( shape = input_shape )
-
+        
         """
         # グラフモード中に tensor 値の中身を確認
         with tf.Session() as sess:

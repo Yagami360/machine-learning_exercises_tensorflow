@@ -19,7 +19,11 @@ class TempleteNetworks(Model):
         return
 
     def call( self, input ):
+        print( "input.dtype : ", input.dtype )
         output = self.conv(input)
+        print( "output.dtype : ", output.dtype )
         output = self.batch_norm(output)
+        print( "output.dtype : ", output.dtype )
         output = self.activate(output)
+        print( "output.dtype : ", output.dtype )
         return output

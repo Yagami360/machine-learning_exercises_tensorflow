@@ -124,11 +124,28 @@ if __name__ == '__main__':
     model_G = TempleteNetworks(out_dim=3)
     
     #================================
-    # optimizer, loss を設定
+    # loss 設定
+    #================================
+    loss_mse = tf.keras.losses.MeanSquaredError()
+
+    #================================
+    # optimizer 設定
+    #================================
+    optimizer_G = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 )
+
+    #================================
+    # AMP 有効化
+    #================================
+    if( args.use_amp ):
+        policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
+        tf.keras.mixed_precision.experimental.set_policy(policy)
+
+    #================================
+    # モデルをコンパイル
     #================================
     model_G.compile(
-        loss = tf.keras.losses.MeanSquaredError(),
-        optimizer = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 ),
+        loss = loss_mse,
+        optimizer = optimizer_G,
         metrics = ['mae']
     )
 
@@ -167,13 +184,6 @@ if __name__ == '__main__':
     callback_board_train = tf.keras.callbacks.TensorBoard( log_dir = os.path.join(args.tensorboard_dir, args.exper_name), write_graph = False )
 
     callbacks = [ callback_board_train, callback_checkpoint ]
-
-    #================================
-    # AMP 有効化
-    #================================
-    if( args.use_amp ):
-        policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
-        tf.keras.mixed_precision.experimental.set_policy(policy)
     
     #================================
     # tfdbg でのデバッグ処理有効化

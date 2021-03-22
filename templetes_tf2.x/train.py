@@ -145,8 +145,8 @@ if __name__ == '__main__':
     # AMP 有効化
     #================================
     if( args.use_amp ):
-        #policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
-        #tf.keras.mixed_precision.experimental.set_policy(policy)
+        policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
+        tf.keras.mixed_precision.experimental.set_policy(policy)
         optimizer_G = tf.keras.mixed_precision.experimental.LossScaleOptimizer(optimizer_G, loss_scale='dynamic')
 
     #================================
