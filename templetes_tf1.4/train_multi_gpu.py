@@ -19,6 +19,32 @@ from utils.utils import set_random_seed, numerical_sort
 from utils.utils import sava_image_tsr
 #from utils.utils import board_add_image, board_add_images
 
+def average_gradients(grad_op_gpus):
+    average_grads = []
+    for grad_and_vars in zip(*grad_op_gpus):
+        # Note that each grad_and_vars looks like the following:
+        #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
+        grads = []
+        for g, _ in grad_and_vars:
+            # Add 0 dimension to the gradients to represent the tower.
+            expanded_g = tf.expand_dims(g, 0)
+
+            # Append on a 'tower' dimension which we will average over below.
+            grads.append(expanded_g)
+
+        # Average over the 'tower' dimension.
+        grad = tf.concat(grads, 0)
+        grad = tf.reduce_mean(grad, 0)
+
+        # Keep in mind that the Variables are redundant because they are shared
+        # across towers. So .. we will just return the first tower's pointer to
+        # the Variable.
+        v = grad_and_vars[0][1]
+        grad_and_var = (grad, v)
+        average_grads.append(grad_and_var)
+
+    return average_grads
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--exper_name", default="debug", help="実験名")
@@ -76,6 +102,9 @@ if __name__ == '__main__':
     if not( os.path.exists(os.path.join(args.save_checkpoints_dir, args.exper_name)) ):
         os.mkdir( os.path.join(args.save_checkpoints_dir, args.exper_name) )
 
+    #================================
+    # tensorflow 設定
+    #================================
     # AMP 有効化
     if( args.use_amp ):
         os.environ['TF_ENABLE_AUTO_MIXED_PRECISION'] = '1'
@@ -123,6 +152,7 @@ if __name__ == '__main__':
     #================================
     optimizer_op_gpus = []
     train_op_gpus = []
+    grad_op_gpus = []
     for gpu_id in args.gpu_ids:
         with tf.device('/gpu:%d' % gpu_id):
             with tf.name_scope('optimizer' + '_gpu_{}'.format(gpu_id)):
@@ -131,9 +161,15 @@ if __name__ == '__main__':
                 if( args.use_amp ):
                     optimizer_op = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer_op)
                 """
-                train_op = optimizer_op.minimize(loss_op)
+                train_op = optimizer_op.minimize(loss_op_gpus[gpu_id])
+                grad_op = optimizer_op.compute_gradients(loss_op_gpus[gpu_id])
+
                 optimizer_op_gpus.append(optimizer_op)
                 train_op_gpus.append(train_op)
+                grad_op_gpus.append(grad_op)
+
+    grad_op = average_gradients(grad_op_gpus)
+    train_op = optimizer.apply_gradients(grad_op)
 
     #================================
     # 学習済みモデルの読み込み
@@ -210,7 +246,7 @@ if __name__ == '__main__':
                 #====================================================
                 # 学習処理
                 #====================================================
-                _, output, loss_G = sess.run([train_op_gpus[0], output_op_gpus[0], loss_op_gpus[0]], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                _, output, loss_G = sess.run([train_op, output_op_gpus[0], loss_op], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
                 if( args.debug and n_prints > 0 ):
                     print("[output] shape={}, dtype={}, min={}, max={}".format(output.shape, output.dtype, np.min(output), np.max(output)))
 
@@ -243,6 +279,7 @@ if __name__ == '__main__':
             #====================================================
             # valid データでの処理
             #====================================================
+            """
             if( step != 0 and ( step % args.n_display_valid_step == 0 ) ):
                 sess.run(ds_valid.init_iter_op)
 
@@ -276,7 +313,7 @@ if __name__ == '__main__':
                 board_valid.add_summary(sess.run(board_loss_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} ), global_step=step)
                 #board_loss_G_total_op = tf.summary.scalar("G/loss_G", loss_G_total/n_valid_loop)
                 #board_valid.add_summary(sess.run(board_loss_G_total_op), global_step=step)
-
+            """
             step += 1
             iters += args.batch_size
             n_prints -= 1
