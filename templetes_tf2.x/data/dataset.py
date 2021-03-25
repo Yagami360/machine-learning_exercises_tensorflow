@@ -26,7 +26,6 @@ def load_dataset(
     image_height = 128, image_width = 128, n_channels =3, batch_size = 4,
     val_rate = 0.01,
     use_tfrecord = True, use_prefeatch = True,
-    strategy = None,                                                        # 複数GPUでの学習時に使用 / tf.distribute.MirroredStrategy()
     seed = 71,
 ):
     image_s_dir = os.path.join( dataset_dir, "image_s" )
@@ -77,10 +76,6 @@ def load_dataset(
         if( use_prefeatch ):
             ds_train = ds_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
             ds_valid = ds_valid.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-
-    if strategy is not None:
-        ds_train = strategy.experimental_distribute_dataset(ds_train)
-        ds_valid = strategy.experimental_distribute_dataset(ds_valid)
 
     return ds_train, ds_valid, n_trains, n_valids
 

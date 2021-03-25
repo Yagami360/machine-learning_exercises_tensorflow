@@ -44,8 +44,9 @@ if __name__ == '__main__':
     parser.add_argument('--data_augument', action='store_true')
     parser.add_argument('--use_datagen', action='store_true', help="データジェネレータを使用するか否か")
     parser.add_argument("--seed", type=int, default=71)
-    parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
+    #parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
     parser.add_argument('--n_workers', type=int, default=4, help="CPUの並列化数（0 で並列化なし）")
+    parser.add_argument('--gpu_ids', type=str, default="0", help="使用GPU （例 : 0,1,2,3）")
     parser.add_argument('--use_amp', action='store_true')
     #parser.add_argument('--use_tfdbg', choices=['not_use', 'cli', 'gui'], default="not_use", help="tfdbg使用フラグ")
     #parser.add_argument('--detect_inf_or_nan', action='store_true')
@@ -53,6 +54,13 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     if( args.debug ):
+        str_gpu_ids = args.gpu_ids.split(',')
+        args.gpu_ids = []
+        for str_gpu_id in str_gpu_ids:
+            id = int(str_gpu_id)
+            if id >= 0:
+                args.gpu_ids.append(id)
+
         for key, value in vars(args).items():
             print('%s: %s' % (str(key), str(value)))
 
@@ -77,6 +85,12 @@ if __name__ == '__main__':
     #================================
     # tensorflow 設定
     #================================
+    # デバイスの配置ログを有効化
+    """
+    if( args.debug ):
+        tf.debugging.set_log_device_placement(True)
+    """
+
     # TensorBoard Debugger V2 有効化
     if( args.use_tensorboard_debugger ):
         tf.debugging.experimental.enable_dump_debug_info(
@@ -94,6 +108,10 @@ if __name__ == '__main__':
 
     # seed 値の固定
     set_random_seed(args.seed)
+
+    # multi gpu
+    mirrored_strategy = tf.distribute.MirroredStrategy()
+    #mirrored_strategy = tf.distribute.MirroredStrategy(tf.config.experimental.list_physical_devices("GPU"))
 
     #================================
     # データセットの読み込み
@@ -113,20 +131,27 @@ if __name__ == '__main__':
             print( "[image_s_valids] shape={}, dtype={}, min={}, max={}".format(image_s_valids.shape, image_s_valids.dtype, np.min(image_s_valids), np.max(image_s_valids)) )
             print( "[image_t_valids] shape={}, dtype={}, min={}, max={}".format(image_t_valids.shape, image_t_valids.dtype, np.min(image_t_valids), np.max(image_t_valids)) )
 
+
     #================================
     # モデルの構造を定義する。
     #================================
-    model_G = TempleteNetworks(out_dim=3)
-    
+    with mirrored_strategy.scope():
+        model_G = TempleteNetworks(out_dim=3)
+        model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )
+
+
     #================================
     # loss 設定
     #================================
-    loss_mse = tf.keras.losses.MeanSquaredError()
+    with mirrored_strategy.scope():
+        loss_mse = tf.keras.losses.MeanSquaredError()
 
     #================================
     # optimizer 設定
     #================================
-    optimizer_G = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 )
+    with mirrored_strategy.scope():
+        optimizer_G = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 )
+
 
     #================================
     # AMP 有効化
@@ -138,14 +163,49 @@ if __name__ == '__main__':
     #================================
     # モデルをコンパイル
     #================================
-    model_G.compile(
-        loss = loss_mse,
-        optimizer = optimizer_G,
-        metrics = ['mae']
-    )
+    with mirrored_strategy.scope():
+        model_G.compile(
+            loss = loss_mse,
+            optimizer = optimizer_G,
+            metrics = ['mae']
+        )
+
+    """
+    with mirrored_strategy.scope():
+        #================================
+        # モデルの構造を定義する。
+        #================================
+        model_G = TempleteNetworks(out_dim=3)
+        model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )
+
+        #================================
+        # loss 設定
+        #================================
+        loss_mse = tf.keras.losses.MeanSquaredError()
+
+        #================================
+        # optimizer 設定
+        #================================
+        optimizer_G = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 )
+
+        #================================
+        # AMP 有効化
+        #================================
+        if( args.use_amp ):
+            policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
+            tf.keras.mixed_precision.experimental.set_policy(policy)
+
+        #================================
+        # モデルをコンパイル
+        #================================
+        model_G.compile(
+            loss = loss_mse,
+            optimizer = optimizer_G,
+            metrics = ['mae']
+        )
+    """
 
     if( args.debug ):
-        model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )    # 動的作成されるネットワークなので、一度ネットワークに入力データを供給しないと summary() を出力できない
         model_G.summary()
 
     #================================

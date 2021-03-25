@@ -40,7 +40,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_augument', action='store_true')
     parser.add_argument('--use_tfrecord', action='store_true')
     parser.add_argument("--seed", type=int, default=71)
-    parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
+    #parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="使用デバイス (CPU or GPU)")
     parser.add_argument('--n_workers', type=int, default=4, help="CPUの並列化数（0 で並列化なし）")
     parser.add_argument('--gpu_ids', type=str, default="0", help="使用GPU （例 : 0,1,2,3）")
     parser.add_argument('--use_amp', action='store_true')
@@ -118,6 +118,10 @@ if __name__ == '__main__':
     #================================    
     # 学習用データセットとテスト用データセットの設定
     ds_train, ds_valid, n_trains, n_valids = load_dataset( args.dataset_dir, image_height = args.image_height, image_width = args.image_width, n_channels = 3, batch_size = args.batch_size, use_tfrecord = args.use_tfrecord, seed = args.seed )
+    with mirrored_strategy.scope():
+        ds_train = mirrored_strategy.experimental_distribute_dataset(ds_train)
+        ds_valid = mirrored_strategy.experimental_distribute_dataset(ds_valid)
+
     if( args.debug ):
         print( "n_trains : ", n_trains )
         print( "n_valids : ", n_valids )
@@ -129,8 +133,8 @@ if __name__ == '__main__':
     #================================
     with mirrored_strategy.scope():
         model_G = TempleteNetworks(out_dim=3)
+        model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )
         if( args.debug ):
-            model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )    # 動的作成されるネットワークなので、一度ネットワークに入力データを供給しないと summary() を出力できない
             model_G.summary()
 
     #================================
@@ -167,7 +171,8 @@ if __name__ == '__main__':
     # loss 関数の設定
     #================================
     with mirrored_strategy.scope():
-        loss_fn = tf.keras.losses.MeanSquaredError()
+        #loss_fn = tf.keras.losses.MeanSquaredError()
+        loss_fn = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.NONE)
         def calc_loss_multi_gpus(target, output, batch_size):
             losses_multi_gpus = loss_fn(target, output)
             return tf.nn.compute_average_loss(losses_multi_gpus, global_batch_size=batch_size)
@@ -207,12 +212,13 @@ if __name__ == '__main__':
     for epoch in tqdm( range(args.n_epoches+init_epoch), desc = "epoches", initial=init_epoch ):
         # ミニバッチデータの取り出し
         for image_s, image_t in ds_train:
+            """
             if( args.debug and n_prints > 0 ):
                 print("[image_s] shape={}, dtype={}, min={}, max={}".format(image_s.shape, image_s.dtype, np.min(image_s.numpy()), np.max(image_s.numpy())))
                 print("[image_t] shape={}, dtype={}, min={}, max={}".format(image_t.shape, image_t.dtype, np.min(image_t.numpy()), np.max(image_t.numpy())))
                 sava_image_tsr( image_s[0], "_debug/image_s.png" )
                 sava_image_tsr( image_t[0], "_debug/image_t.png" )
-
+            """
             #====================================================
             # 学習処理
             #====================================================
@@ -226,6 +232,8 @@ if __name__ == '__main__':
                     # 損失関数の計算
                     #loss_G = loss_fn(target, output)
                     loss_G = calc_loss_multi_gpus(target, output, batch_size)
+                    #loss_G = tf.reduce_sum(loss_G, keepdims=True) * (1. / 128.0) # 要注意
+
 
                 # モデルの更新処理
                 grads = tape.gradient(loss_G, model_G.trainable_weights)
@@ -236,7 +244,7 @@ if __name__ == '__main__':
             @tf.function    # 高速化のためのデコレーター
             def train_on_batch_multi_gpus(input, target, batch_size):
                 losses_gpus = mirrored_strategy.run(train_on_batch, args=(input, target, batch_size))
-                return mirrored_strategy.reduce(tf.distribute.ReduceOp.SUM, losses_gpus, axis=None)
+                return mirrored_strategy.reduce(tf.distribute.ReduceOp.SUM, losses_gpus, axis=None)     # lossのreduceをなくした分ここでreduceする
 
             #output, loss_G = train_on_batch( image_s, image_t )
             output, loss_G = train_on_batch_multi_gpus( image_s, image_t, args.batch_size )
