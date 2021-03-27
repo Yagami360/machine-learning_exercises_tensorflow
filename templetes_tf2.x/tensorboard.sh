@@ -3,7 +3,7 @@ set -eu
 TENSORBOARD_DIR=tensorboard
 EXPER_NAME=debug
 PORT=6006
-USE_DEBUGGER=1
+USE_DEBUGGER=0
 
 mkdir -p ${TENSORBOARD_DIR}
 if [ ${USE_DEBUGGER} = 0 ]; then

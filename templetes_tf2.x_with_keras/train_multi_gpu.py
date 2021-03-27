@@ -170,41 +170,6 @@ if __name__ == '__main__':
             metrics = ['mae']
         )
 
-    """
-    with mirrored_strategy.scope():
-        #================================
-        # モデルの構造を定義する。
-        #================================
-        model_G = TempleteNetworks(out_dim=3)
-        model_G( tf.zeros([args.batch_size, args.image_height, args.image_width, 3], dtype=tf.float32) )
-
-        #================================
-        # loss 設定
-        #================================
-        loss_mse = tf.keras.losses.MeanSquaredError()
-
-        #================================
-        # optimizer 設定
-        #================================
-        optimizer_G = tf.keras.optimizers.Adam( learning_rate=args.lr, beta_1=args.beta1, beta_2=args.beta2 )
-
-        #================================
-        # AMP 有効化
-        #================================
-        if( args.use_amp ):
-            policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
-            tf.keras.mixed_precision.experimental.set_policy(policy)
-
-        #================================
-        # モデルをコンパイル
-        #================================
-        model_G.compile(
-            loss = loss_mse,
-            optimizer = optimizer_G,
-            metrics = ['mae']
-        )
-    """
-
     if( args.debug ):
         model_G.summary()
 

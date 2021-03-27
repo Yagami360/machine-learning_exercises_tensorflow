@@ -85,8 +85,10 @@ if __name__ == '__main__':
     #tf.enable_eager_execution()                    
     
     # デバイスの配置ログを有効化
+    """
     if( args.debug ):
         tf.debugging.set_log_device_placement(True)
+    """
 
     # TensorBoard Debugger V2 有効化
     if( args.use_tensorboard_debugger ):
@@ -212,13 +214,15 @@ if __name__ == '__main__':
     for epoch in tqdm( range(args.n_epoches+init_epoch), desc = "epoches", initial=init_epoch ):
         # ミニバッチデータの取り出し
         for image_s, image_t in ds_train:
-            """
+            image_s_gpus = image_s.values
+            image_t_gpus = image_t.values
             if( args.debug and n_prints > 0 ):
-                print("[image_s] shape={}, dtype={}, min={}, max={}".format(image_s.shape, image_s.dtype, np.min(image_s.numpy()), np.max(image_s.numpy())))
-                print("[image_t] shape={}, dtype={}, min={}, max={}".format(image_t.shape, image_t.dtype, np.min(image_t.numpy()), np.max(image_t.numpy())))
-                sava_image_tsr( image_s[0], "_debug/image_s.png" )
-                sava_image_tsr( image_t[0], "_debug/image_t.png" )
-            """
+                for i in range(len(args.gpu_ids)):
+                    print("[image_s_gpus[{}]] shape={}, dtype={}, min={}, max={}".format(i, image_s_gpus[i].shape, image_s_gpus[i].dtype, np.min(image_s_gpus[i].numpy()), np.max(image_s_gpus[i].numpy())))
+                    print("[image_t_gpus[{}]] shape={}, dtype={}, min={}, max={}".format(i, image_t_gpus[i].shape, image_t_gpus[i].dtype, np.min(image_t_gpus[i].numpy()), np.max(image_t_gpus[i].numpy())))
+                    sava_image_tsr( image_s_gpus[i][0], "_debug/image_s_gpu{}.png".format(i) )
+                    sava_image_tsr( image_t_gpus[i][0], "_debug/image_t_gpu{}.png".format(i) )
+
             #====================================================
             # 学習処理
             #====================================================
@@ -234,7 +238,6 @@ if __name__ == '__main__':
                     loss_G = calc_loss_multi_gpus(target, output, batch_size)
                     #loss_G = tf.reduce_sum(loss_G, keepdims=True) * (1. / 128.0) # 要注意
 
-
                 # モデルの更新処理
                 grads = tape.gradient(loss_G, model_G.trainable_weights)
                 optimizer_G.apply_gradients(zip(grads, model_G.trainable_weights))
@@ -243,11 +246,22 @@ if __name__ == '__main__':
 
             @tf.function    # 高速化のためのデコレーター
             def train_on_batch_multi_gpus(input, target, batch_size):
-                losses_gpus = mirrored_strategy.run(train_on_batch, args=(input, target, batch_size))
-                return mirrored_strategy.reduce(tf.distribute.ReduceOp.SUM, losses_gpus, axis=None)     # lossのreduceをなくした分ここでreduceする
+                loss_gpus = mirrored_strategy.run(train_on_batch, args=(input, target, batch_size))
+                return mirrored_strategy.reduce(tf.distribute.ReduceOp.MEAN, loss_gpus, axis=None)     # lossのreduceをなくした分ここでreduceする
 
-            #output, loss_G = train_on_batch( image_s, image_t )
-            output, loss_G = train_on_batch_multi_gpus( image_s, image_t, args.batch_size )
+            output_gpus, loss_G_gpus = train_on_batch_multi_gpus( image_s, image_t, args.batch_size )
+            output_gpus, loss_G_gpus = output_gpus.values, loss_G_gpus.values
+
+            loss_G_gpus_total = 0
+            for i in range(len(args.gpu_ids)):
+                loss_G_gpus_total += loss_G_gpus[i]
+
+            loss_G = loss_G_gpus_total / len(args.gpu_ids)
+            output = tf.concat(output_gpus, axis=0)
+            if( args.debug and n_prints > 0 ):
+                for i in range(len(args.gpu_ids)):
+                    print("[output_gpus] shape={}, dtype={}, min={}, max={}".format(output_gpus[i].shape, output_gpus[i].dtype, np.min(output_gpus[i]), np.max(output_gpus[i])))                    
+                print("[output] shape={}, dtype={}, min={}, max={}".format(output.shape, output.dtype, np.min(output), np.max(output)))
 
             #====================================================
             # 学習過程の表示
@@ -257,18 +271,19 @@ if __name__ == '__main__':
                 pass
 
                 # loss
-                print( "epoch={}, step={}, loss_G={:.5f}".format(epoch, step, loss_G) )
+                print( "epoch={}, step={}, loss_G={:.5f}, loss_G_gpus={}".format(epoch, step, loss_G, loss_G_gpus) )
                 with board_train.as_default():
                     tf.summary.scalar("G/loss_G", loss_G, step=step+1, description="生成器の全loss")
+                    for i in range(len(args.gpu_ids)):
+                        tf.summary.scalar("G/loss_G_gpu{}",format(i), loss_G_gpus[i], step=step+1)
 
                 # visual images
                 with board_train.as_default():
-                    #tf.summary.image( "train/image_s", image_s, step=step+1 )
-                    #tf.summary.image( "train/image_t", image_t, step=step+1 )
-                    visuals = [
-                        [ image_s, image_t, output ],
-                    ]
-                    board_add_images(board_train, 'train', visuals, step+1 )
+                    for i in range(len(args.gpu_ids)):
+                        visuals = [
+                            [ image_s_gpus[i], image_t_gpus[i], output_gpus[i] ],
+                        ]
+                        board_add_images(board_train, 'train_gpu{}'.format(i), visuals, step+1 )
 
             #====================================================
             # valid データでの処理

@@ -14,7 +14,7 @@ from tensorflow.python.client import device_lib
 
 # 自作モジュール
 from data.dataset import Dataset
-from models.networks import TempleteNetworks, TempleteNetworksMultiGPU
+from models.networks import TempleteNetworks
 from utils.utils import set_random_seed, numerical_sort
 from utils.utils import sava_image_tsr
 #from utils.utils import board_add_image, board_add_images
@@ -26,18 +26,18 @@ def average_gradients(grad_op_gpus):
         #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
         grads = []
         for g, _ in grad_and_vars:
-            # Add 0 dimension to the gradients to represent the tower.
+            # Add 0 dimension to the gradients to represent the grad_op_gpus.
             expanded_g = tf.expand_dims(g, 0)
 
-            # Append on a 'tower' dimension which we will average over below.
+            # Append on a 'grad_op_gpus' dimension which we will average over below.
             grads.append(expanded_g)
 
-        # Average over the 'tower' dimension.
+        # Average over the 'grad_op_gpus' dimension.
         grad = tf.concat(grads, 0)
         grad = tf.reduce_mean(grad, 0)
 
         # Keep in mind that the Variables are redundant because they are shared
-        # across towers. So .. we will just return the first tower's pointer to
+        # across grad_op_gpus. So .. we will just return the first grad_op_gpus's pointer to
         # the Variable.
         v = grad_and_vars[0][1]
         grad_and_var = (grad, v)
@@ -128,14 +128,31 @@ if __name__ == '__main__':
     #================================
     # 変数とプレースホルダを設定
     #================================
-    image_s_holder = tf.placeholder(tf.float32, [None, args.image_height, args.image_width, 3], name = "image_s_holder" )
-    image_t_holder = tf.placeholder(tf.float32, [None, args.image_height, args.image_width, 3], name = "image_t_holder" )
+    image_s_holder = tf.placeholder(tf.float32, [args.batch_size, args.image_height, args.image_width, 3], name = "image_s_holder" )
+    image_t_holder = tf.placeholder(tf.float32, [args.batch_size, args.image_height, args.image_width, 3], name = "image_t_holder" )
+
+    # GPU 数で batch size 次元を分割
+    image_s_holder_gpus = tf.split(image_s_holder, len(args.gpu_ids))
+    image_t_holder_gpus = tf.split(image_t_holder, len(args.gpu_ids))   
+    if( args.debug ):
+        print( "image_s_holder.shape : ", image_s_holder.shape )
+        print( "image_t_holder.shape : ", image_t_holder.shape )
+        for i in range(len(image_s_holder_gpus)):
+            print( "image_s_holder_gpus[{}].shape : {}".format(i, image_s_holder_gpus[i].shape) )
+            print( "image_t_holder_gpus[{}].shape : {}".format(i, image_t_holder_gpus[i].shape) )
 
     #================================
     # モデルの構造を定義する。
     #================================
-    model_G = TempleteNetworksMultiGPU(out_dim=3, gpu_ids=args.gpu_ids)
-    output_op_gpus = model_G(image_s_holder)
+    output_op_gpus = []
+    for gpu_id in args.gpu_ids:
+        with tf.device('/gpu:%d' % gpu_id):
+            model_G = TempleteNetworks(out_dim=3)
+            output_op = model_G(image_s_holder_gpus[gpu_id])
+            output_op_gpus.append(output_op)
+
+    if( args.debug ):
+        print( "output_op_gpus : ", output_op_gpus )
 
     #================================
     # loss 関数の設定
@@ -144,32 +161,51 @@ if __name__ == '__main__':
     for gpu_id in args.gpu_ids:
         with tf.device('/gpu:%d' % gpu_id):
             with tf.name_scope('loss' + '_gpu_{}'.format(gpu_id)):
-                loss_op = tf.reduce_mean( tf.abs(image_t_holder - output_op_gpus[gpu_id]) )
+                loss_op = tf.reduce_mean( tf.abs(image_t_holder_gpus[gpu_id] - output_op_gpus[gpu_id]) )
                 loss_op_gpus.append(loss_op)
+
+    if( args.debug ):
+        print( "loss_op_gpus : ", loss_op_gpus )
 
     #================================
     # optimizer の設定
     #================================
     optimizer_op_gpus = []
-    train_op_gpus = []
     grad_op_gpus = []
     for gpu_id in args.gpu_ids:
         with tf.device('/gpu:%d' % gpu_id):
             with tf.name_scope('optimizer' + '_gpu_{}'.format(gpu_id)):
                 optimizer_op = tf.train.AdamOptimizer( learning_rate=args.lr, beta1=args.beta1, beta2=args.beta2 )
-                """
                 if( args.use_amp ):
                     optimizer_op = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer_op)
-                """
-                train_op = optimizer_op.minimize(loss_op_gpus[gpu_id])
-                grad_op = optimizer_op.compute_gradients(loss_op_gpus[gpu_id])
-
                 optimizer_op_gpus.append(optimizer_op)
-                train_op_gpus.append(train_op)
+
+                grad_op = optimizer_op_gpus[gpu_id].compute_gradients(loss_op_gpus[gpu_id])
+                #print( "grad_op : ", grad_op )
+
+                # 何故か grad_op に (None, <tf.Variable 'TempleteNetworks/Variable:0' shape=(1, 1, 3, 3) dtype=float32_ref>) が入るケースがあるので、この要素を除外
+                # grad_op : (None, <tf.Variable 'TempleteNetworks/Variable:0' shape=(1, 1, 3, 3) dtype=float32_ref>), (<tf.Tensor 'gradients_1/TempleteNetworks_1/Conv2D_grad/tuple/control_dependency_1:0' shape=(1, 1, 3, 3) dtype=float32>, <tf.Variable 'TempleteNetworks_1/Variable:0' shape=(1, 1, 3, 3) dtype=float32_ref>)]
+                if( len(grad_op) >= 2 ):
+                    remove_i = 0
+                    for i, grad_op_ in enumerate(grad_op):
+                        #print( "grad_op_ : ", grad_op_ )
+                        #print( "len(grad_op_) : ", len(grad_op_) )
+                        if grad_op_[0] is None:
+                            remove_i = i
+
+                    del grad_op[remove_i]
+
                 grad_op_gpus.append(grad_op)
 
-    grad_op = average_gradients(grad_op_gpus)
-    train_op = optimizer.apply_gradients(grad_op)
+    if( args.debug ):
+        print( "grad_op_gpus : ", grad_op_gpus )
+
+    with tf.name_scope('optimizer'.format(gpu_id)):
+        grad_op = average_gradients(grad_op_gpus)
+        if( len(args.gpu_ids) == 1 ):
+            train_op = optimizer_op_gpus[0].minimize(loss_op_gpus[0])
+        else:
+            train_op = optimizer_op_gpus[-1].apply_gradients(grad_op)
 
     #================================
     # 学習済みモデルの読み込み
@@ -194,7 +230,11 @@ if __name__ == '__main__':
     board_train = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name), sess.graph )
     board_valid = tf.summary.FileWriter( os.path.join(args.tensorboard_dir, args.exper_name + "_valid") )
 
-    board_loss_op = tf.summary.scalar("G/loss_G", loss_op_gpus[0])
+    board_loss_op_gpus = []
+    for gpu_id in args.gpu_ids:     
+        board_loss_op = tf.summary.scalar("G/loss_G_gpu{}".format(gpu_id), loss_op_gpus[gpu_id])
+        board_loss_op_gpus.append(board_loss_op)
+
     board_train_image_s_op = tf.summary.image( 'train/image_s', image_s_holder, max_outputs = args.batch_size )
     board_train_image_t_op = tf.summary.image( 'train/image_t', image_t_holder, max_outputs = args.batch_size )
     board_train_output_op = tf.summary.image( 'train/output', image_t_holder, max_outputs = args.batch_size )
@@ -246,32 +286,49 @@ if __name__ == '__main__':
                 #====================================================
                 # 学習処理
                 #====================================================
-                _, output, loss_G = sess.run([train_op, output_op_gpus[0], loss_op], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
-                if( args.debug and n_prints > 0 ):
-                    print("[output] shape={}, dtype={}, min={}, max={}".format(output.shape, output.dtype, np.min(output), np.max(output)))
+                sess.run(train_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
 
                 #====================================================
                 # 学習過程の表示
                 #====================================================
                 if( step == 0 or ( step % args.n_diaplay_step == 0 ) ):
+                    #-----------------
                     # lr
+                    #-----------------
                     pass
 
+                    #-----------------
                     # loss
-                    print( "epoch={}, step={}, loss_G={:.5f}".format(epoch, step, loss_G) )
-                    board_train.add_summary(sess.run(board_loss_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} ), global_step=step)
+                    #-----------------
+                    loss_G_gpus = []
+                    loss_G_gpus_total = 0
+                    for gpu_id in args.gpu_ids: 
+                        loss_G = sess.run(loss_op_gpus[gpu_id], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                        loss_G_gpus_total += loss_G
+                        loss_G_gpus.append(loss_G)
 
+                    loss_G = loss_G_gpus_total / len(args.gpu_ids)
+                    print( "epoch={}, step={}, loss_G={:.5f}, loss_G_gpus={}".format(epoch, step, loss_G, loss_G_gpus) )
+
+                    # # [ToDo] 全バッチでの loss 値も表示されるように修正
+                    for gpu_id in args.gpu_ids:
+                        board_train.add_summary(sess.run(board_loss_op_gpus[gpu_id], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} ), global_step=step)
+
+                    #-----------------
                     # 画像表示
+                    #-----------------
+                    output_gpus = []
+                    for gpu_id in args.gpu_ids: 
+                        output = sess.run(output_op_gpus[gpu_id], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                        output_gpus.append(output)
+
+                    output = np.concatenate(output_gpus, axis=0)
+                    if( args.debug and n_prints > 0 ):
+                        print("[output] shape={}, dtype={}, min={}, max={}".format(output.shape, output.dtype, np.min(output), np.max(output)))
+
                     board_train.add_summary(sess.run(board_train_image_s_op, feed_dict = {image_s_holder: image_s} ), global_step=step)
                     board_train.add_summary(sess.run(board_train_image_t_op, feed_dict = {image_t_holder: image_t} ), global_step=step)
                     board_train.add_summary(sess.run(board_train_output_op, feed_dict = {image_t_holder: output} ), global_step=step)
-
-                    """
-                    visuals = [
-                        [ image_s, image_t, output ],
-                    ]
-                    board_add_images(board_train, 'train', visuals, step+1 )
-                    """
 
             except tf.errors.OutOfRangeError:
                 break
@@ -279,7 +336,6 @@ if __name__ == '__main__':
             #====================================================
             # valid データでの処理
             #====================================================
-            """
             if( step != 0 and ( step % args.n_display_valid_step == 0 ) ):
                 sess.run(ds_valid.init_iter_op)
 
@@ -291,7 +347,17 @@ if __name__ == '__main__':
                         image_s, image_t = sess.run(ds_valid.batch_op)
 
                         # 出力画像と loss 値取得
-                        output, loss_G = sess.run([output_op_gpus[0], loss_op_gpus[0]], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                        output_gpus = []
+                        loss_G_gpus = []
+                        loss_G_gpus_total = 0
+                        for gpu_id in args.gpu_ids:
+                            output, loss_G = sess.run([output_op_gpus[gpu_id], loss_op_gpus[gpu_id]], feed_dict = {image_s_holder: image_s, image_t_holder: image_t} )
+                            output_gpus.append(output)
+                            loss_G_gpus.append(loss_G)
+                            loss_G_gpus_total += loss_G
+
+                        output = np.concatenate(output_gpus, axis=0)
+                        loss_G = loss_G_gpus_total / len(args.gpu_ids)
                         loss_G_total += loss_G
 
                         # 画像表示
@@ -313,7 +379,7 @@ if __name__ == '__main__':
                 board_valid.add_summary(sess.run(board_loss_op, feed_dict = {image_s_holder: image_s, image_t_holder: image_t} ), global_step=step)
                 #board_loss_G_total_op = tf.summary.scalar("G/loss_G", loss_G_total/n_valid_loop)
                 #board_valid.add_summary(sess.run(board_loss_G_total_op), global_step=step)
-            """
+
             step += 1
             iters += args.batch_size
             n_prints -= 1
