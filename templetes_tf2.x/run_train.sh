@@ -24,6 +24,8 @@ docker run -d -it -v ${HOME}/machine-learning_exercises_tensorflow:/mnt/machine-
 docker exec -it ${CONTAINER_NAME} /bin/sh -c "cd /mnt/machine-learning_exercises_tensorflow/templetes_tf2.x && \
     python train.py \
         --exper_name ${EXPER_NAME} \
-        --load_checkpoints_dir ${LOAD_CHECKPOINTS_DIR} \
-        --use_tensorboard_debugger \
+        --n_diaplay_step 10 \
         --debug"
+
+#        --load_checkpoints_dir ${LOAD_CHECKPOINTS_DIR} \
+#        --use_tensorboard_debugger \

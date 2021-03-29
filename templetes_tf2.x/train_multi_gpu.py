@@ -173,11 +173,16 @@ if __name__ == '__main__':
     # loss 関数の設定
     #================================
     with mirrored_strategy.scope():
-        #loss_fn = tf.keras.losses.MeanSquaredError()
+        # tf.keras.losses.Reduction.NONE : loss の reduction をなくす
+        # reduction をなくした分は、カスタムトレーニング処理の mirrored_strategy.reduce() で reduction する
         loss_fn = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.NONE)
+
         def calc_loss_multi_gpus(target, output, batch_size):
-            losses_multi_gpus = loss_fn(target, output)
-            return tf.nn.compute_average_loss(losses_multi_gpus, global_batch_size=batch_size)
+            losse_gpus = loss_fn(target, output)
+            # GPU 度の loss 値の合計を global_batch_size で除算
+            loss = tf.nn.compute_average_loss(losse_gpus, global_batch_size=batch_size)
+            #loss = tf.reduce_sum(losse_gpus, keepdims=True) * (1. / 128.0)
+            return loss
 
     #================================
     # tfdbg でのデバッグ処理有効化
@@ -217,11 +222,11 @@ if __name__ == '__main__':
             image_s_gpus = image_s.values
             image_t_gpus = image_t.values
             if( args.debug and n_prints > 0 ):
-                for i in range(len(args.gpu_ids)):
-                    print("[image_s_gpus[{}]] shape={}, dtype={}, min={}, max={}".format(i, image_s_gpus[i].shape, image_s_gpus[i].dtype, np.min(image_s_gpus[i].numpy()), np.max(image_s_gpus[i].numpy())))
-                    print("[image_t_gpus[{}]] shape={}, dtype={}, min={}, max={}".format(i, image_t_gpus[i].shape, image_t_gpus[i].dtype, np.min(image_t_gpus[i].numpy()), np.max(image_t_gpus[i].numpy())))
-                    sava_image_tsr( image_s_gpus[i][0], "_debug/image_s_gpu{}.png".format(i) )
-                    sava_image_tsr( image_t_gpus[i][0], "_debug/image_t_gpu{}.png".format(i) )
+                for gpu_id in range(len(args.gpu_ids)):
+                    print("[image_s_gpus[{}]] shape={}, dtype={}, min={}, max={}".format(gpu_id, image_s_gpus[gpu_id].shape, image_s_gpus[gpu_id].dtype, np.min(image_s_gpus[gpu_id].numpy()), np.max(image_s_gpus[gpu_id].numpy())))
+                    print("[image_t_gpus[{}]] shape={}, dtype={}, min={}, max={}".format(gpu_id, image_t_gpus[gpu_id].shape, image_t_gpus[gpu_id].dtype, np.min(image_t_gpus[gpu_id].numpy()), np.max(image_t_gpus[gpu_id].numpy())))
+                    sava_image_tsr( image_s_gpus[gpu_id][0], "_debug/image_s_gpu{}.png".format(gpu_id) )
+                    sava_image_tsr( image_t_gpus[gpu_id][0], "_debug/image_t_gpu{}.png".format(gpu_id) )
 
             #====================================================
             # 学習処理
@@ -234,33 +239,24 @@ if __name__ == '__main__':
                     output = model_G(input, training=True)
 
                     # 損失関数の計算
-                    #loss_G = loss_fn(target, output)
                     loss_G = calc_loss_multi_gpus(target, output, batch_size)
-                    #loss_G = tf.reduce_sum(loss_G, keepdims=True) * (1. / 128.0) # 要注意
 
                 # モデルの更新処理
                 grads = tape.gradient(loss_G, model_G.trainable_weights)
                 optimizer_G.apply_gradients(zip(grads, model_G.trainable_weights))
-                #train_acc_metric.update_state(target, logits)
                 return output, loss_G
 
-            @tf.function    # 高速化のためのデコレーター
+            #@tf.function    # 高速化のためのデコレーター
             def train_on_batch_multi_gpus(input, target, batch_size):
-                loss_gpus = mirrored_strategy.run(train_on_batch, args=(input, target, batch_size))
-                return mirrored_strategy.reduce(tf.distribute.ReduceOp.MEAN, loss_gpus, axis=None)     # lossのreduceをなくした分ここでreduceする
+                output_gpus, loss_gpus = mirrored_strategy.run(train_on_batch, args=(input, target, batch_size))
+                output = tf.concat(output_gpus.values, axis=0)
+                # loss_fn の reduction をなくした分は、mirrored_strategy.reduce で reduction する
+                loss_G = mirrored_strategy.reduce(tf.distribute.ReduceOp.SUM, loss_gpus, axis=None)
+                #loss_G = mirrored_strategy.reduce(tf.distribute.ReduceOp.MEAN, loss_gpus, axis=None)
+                return output,loss_G
 
-            output_gpus, loss_G_gpus = train_on_batch_multi_gpus( image_s, image_t, args.batch_size )
-            output_gpus, loss_G_gpus = output_gpus.values, loss_G_gpus.values
-
-            loss_G_gpus_total = 0
-            for i in range(len(args.gpu_ids)):
-                loss_G_gpus_total += loss_G_gpus[i]
-
-            loss_G = loss_G_gpus_total / len(args.gpu_ids)
-            output = tf.concat(output_gpus, axis=0)
+            output, loss_G = train_on_batch_multi_gpus( image_s, image_t, args.batch_size )
             if( args.debug and n_prints > 0 ):
-                for i in range(len(args.gpu_ids)):
-                    print("[output_gpus] shape={}, dtype={}, min={}, max={}".format(output_gpus[i].shape, output_gpus[i].dtype, np.min(output_gpus[i]), np.max(output_gpus[i])))                    
                 print("[output] shape={}, dtype={}, min={}, max={}".format(output.shape, output.dtype, np.min(output), np.max(output)))
 
             #====================================================
@@ -271,62 +267,68 @@ if __name__ == '__main__':
                 pass
 
                 # loss
-                print( "epoch={}, step={}, loss_G={:.5f}, loss_G_gpus={}".format(epoch, step, loss_G, loss_G_gpus) )
+                print( "epoch={}, step={}, loss_G={:.5f}".format(epoch, step, loss_G) )
                 with board_train.as_default():
                     tf.summary.scalar("G/loss_G", loss_G, step=step+1, description="生成器の全loss")
-                    for i in range(len(args.gpu_ids)):
-                        tf.summary.scalar("G/loss_G_gpu{}",format(i), loss_G_gpus[i], step=step+1)
 
                 # visual images
                 with board_train.as_default():
-                    for i in range(len(args.gpu_ids)):
-                        visuals = [
-                            [ image_s_gpus[i], image_t_gpus[i], output_gpus[i] ],
-                        ]
-                        board_add_images(board_train, 'train_gpu{}'.format(i), visuals, step+1 )
+                    visuals = [
+                        [ tf.concat(image_s_gpus, axis=0), tf.concat(image_t_gpus, axis=0), output ],
+                    ]
+                    board_add_images(board_train, 'train', visuals, step+1 )
 
             #====================================================
             # valid データでの処理
             #====================================================
-            """
             if( step != 0 and ( step % args.n_display_valid_step == 0 ) ):
                 loss_G_total = 0
                 n_valid_loop = 0                
                 for i, (image_s, image_t) in enumerate(ds_valid):
+                    image_s_gpus = image_s.values
+                    image_t_gpus = image_t.values
+
                     #---------------------------------
                     # 推論処理
                     #---------------------------------
-                    @tf.function
-                    def eval_on_batch(input, target):
+                    #@tf.function
+                    def eval_on_batch(input, target, batch_size=1):
                         # スコープ以下を自動微分計算
                         with tf.GradientTape() as tape:
                             # モデルの forward 処理
                             output = model_G(input, training=False)
 
                             # 損失関数の計算
-                            loss_G = loss_fn(target, output)
+                            loss_G = calc_loss_multi_gpus(target, output, batch_size)
 
                         return output, loss_G
 
-                    output, loss_G = eval_on_batch( image_s, image_t )
+                    #@tf.function
+                    def eval_on_batch_multi_gpus(input, target, batch_size=1):
+                        output_gpus, loss_gpus = mirrored_strategy.run(eval_on_batch, args=(input, target, batch_size))
+                        output = tf.concat(output_gpus.values, axis=0)
+                        loss_G = mirrored_strategy.reduce(tf.distribute.ReduceOp.SUM, loss_gpus, axis=None) 
+                        #loss_G = mirrored_strategy.reduce(tf.distribute.ReduceOp.MEAN, loss_gpus, axis=None) 
+                        return output, loss_G
+
+                    output, loss_G = eval_on_batch_multi_gpus( image_s, image_t, 1 )
                     loss_G_total += loss_G
 
                     #---------------------------------
                     # 生成画像表示
                     #---------------------------------
                     if( i <= args.n_display_valid ):
-                        with board_train.as_default():
+                        with board_valid.as_default():
                             visuals = [
-                                [ image_s, image_t, output ],
+                                [ tf.concat(image_s_gpus, axis=0), tf.concat(image_t_gpus, axis=0), output ],
                             ]
-                            board_add_images(board_valid, 'valid/{}'.format(i), visuals, step+1 )                            
+                            board_add_images(board_train, 'valid/{}'.format(i), visuals, step+1 )
 
                     n_valid_loop += 1
 
                 # loss 値表示
-                with board_train.as_default():
+                with board_valid.as_default():
                     tf.summary.scalar("G/loss_G", loss_G_total/n_valid_loop, step=step+1, description="生成器の全loss")
-            """
 
             step += 1
             iters += args.batch_size

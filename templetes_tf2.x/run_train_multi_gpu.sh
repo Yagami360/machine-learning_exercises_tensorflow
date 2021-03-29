@@ -24,6 +24,6 @@ docker run -d -it -v ${HOME}/machine-learning_exercises_tensorflow:/mnt/machine-
 docker exec -it ${CONTAINER_NAME} /bin/sh -c "cd /mnt/machine-learning_exercises_tensorflow/templetes_tf2.x && \
     python train_multi_gpu.py \
         --exper_name ${EXPER_NAME} \
-        --n_diaplay_step 10 \
+        --n_diaplay_step 10 --n_display_valid_step 10 \
         --gpu_ids ${GPU_IDS} \
         --debug"
